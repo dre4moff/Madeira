@@ -28,6 +28,7 @@ struct OwnedCacheCleaner {
         if let documents,
            (try? documents.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == false {
             anchors.append(documents.appendingPathComponent("shadercache").standardizedFileURL)
+            anchors.append(documents.appendingPathComponent("fex-jit-dump.bin").standardizedFileURL)
         }
         guard let anchor = anchors.first(where: { url.standardizedFileURL.path == $0.path || url.standardizedFileURL.path.hasPrefix($0.path + "/") }) else { return false }
         var current = url.standardizedFileURL
@@ -59,6 +60,16 @@ struct OwnedCacheCleaner {
     }
     func clean() -> Result {
         var result = Result()
+        // This exact file is an old generated crash dump, never a shader cache.
+        // Preserve it when the owner explicitly requests a new diagnostic dump.
+        if let documents, ProcessInfo.processInfo.environment["MADEIRA_JIT_DUMP"] != "1" {
+            let dump = documents.appendingPathComponent("fex-jit-dump.bin")
+            if safe(dump), let kind = try? dump.resourceValues(forKeys: keys), kind.isRegularFile == true {
+                let bytes = Int64(kind.fileSize ?? 0)
+                if (try? fm.removeItem(at: dump)) != nil { result.removedBytes += bytes }
+                else { result.failedItems += 1 }
+            }
+        }
         // Survive a crash/force quit: these temporary paths never contain user data.
         if safe(temporary), let items = try? fm.contentsOfDirectory(at: temporary, includingPropertiesForKeys: Array(keys)) {
             for file in items {

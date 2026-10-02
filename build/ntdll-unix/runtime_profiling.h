@@ -28,4 +28,12 @@ static inline int madeira_runtime_profiling_cached(void)
     }
     return value;
 }
+
+/* An entire executable pool can approach a gigabyte. Fault diagnostics stay
+ * available, but disk dumps require a separate explicit opt-in. */
+static inline int madeira_jit_dump_enabled(void)
+{
+    const char *choice = getenv("MADEIRA_JIT_DUMP");
+    return choice && strcmp(choice, "1") == 0;
+}
 #endif

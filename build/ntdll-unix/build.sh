@@ -4,7 +4,7 @@ set -e
 BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$BUILD_DIR/../.." && pwd)"
 WINE_SRC="$REPO_ROOT/wine"
-WINE_BUILD="$WINE_SRC/build-macos"
+WINE_BUILD="${MADEIRA_WINE_CONFIG_DIR:-$WINE_SRC/build-macos}"
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 OBJ_DIR="$BUILD_DIR/obj"
 APP_LIB="$REPO_ROOT/app/Madeira/libntdll_unix.a"
@@ -45,6 +45,19 @@ compile_one() {
         FAILED_FILES="$FAILED_FILES $name"
     fi
 }
+
+# Recompile just the signal bridge, preserving all unrelated engine objects.
+# Useful for a dump-policy change without rebuilding network/crypto modules.
+if [ "${MADEIRA_ONLY:-}" = "signal_arm64" ]; then
+    test -f "$APP_LIB" && test -f "$WINE_BUILD/include/config.h"
+    compile_one "$BUILD_DIR/signal_arm64_ios.c" "signal_arm64"
+    [ "$FAILED" -eq 0 ]
+    cp "$APP_LIB" "$OBJ_DIR/libntdll_unix.a"
+    xcrun ar r "$OBJ_DIR/libntdll_unix.a" "$OBJ_DIR/signal_arm64.o"
+    xcrun ranlib "$OBJ_DIR/libntdll_unix.a"
+    cp "$OBJ_DIR/libntdll_unix.a" "$APP_LIB"
+    exit 0
+fi
 
 # iOS-Madeira 2026-07-05 (Steam S0): compile a DLL's unix side into
 # libntdll_unix.a. Args: src, obj-name, funcs-prefix, extra flags...

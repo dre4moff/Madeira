@@ -7,6 +7,7 @@ MetalFX bridges for DX11/DX12, cache maintenance and measured-overhead reduction
 
 **Start here:** [complete fork changes and evidence](docs/FORK_CHANGELOG.md),
 [unsigned release and personal VC runtime setup](docs/FORK_RELEASE.md),
+[D3D12 startup corrections](docs/R20_D3D12_STARTUP.md),
 [performance analysis](docs/R19_PERFORMANCE.md).
 The latest patch is compiled and synthetically tested; higher on-device FPS and
 universal DLSS compatibility are not established. Microsoft runtime DLLs are

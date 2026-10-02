@@ -55,8 +55,8 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>MadeiraBuild</key>
-	<string>0.1.1 r19-performance / VC Runtime + DX11 + MetalFX + controller fixes / official FEX Windows engine / optimized Release</string>
+	<string>0.1.1 r20-d3d12-startup / D3D12 device lifetime + removal status / VC Runtime + DX11 + MetalFX + controller fixes / official FEX Windows engine / optimized Release</string>
 	<key>MadeiraProfileBuild</key>
-	<true/>
+	<false/>
 </dict>
 </plist>

@@ -5280,7 +5280,7 @@ skip_reclaim_band: ;
                      * slots to a file. Lets us disassemble FEX-emitted ARM64 offline
                      * to verify codegen correctness independently. */
                     static volatile int dumped = 0;
-                    if (cnt == 1 && __sync_bool_compare_and_swap(&dumped, 0, 1))
+                    if (cnt == 1 && madeira_jit_dump_enabled() && __sync_bool_compare_and_swap(&dumped, 0, 1))
                     {
                         extern void *ios_jit_rw_base_global;
                         extern size_t ios_jit_pool_size_global;
@@ -10116,7 +10116,7 @@ static void ill_handler( int signal, siginfo_t *siginfo, void *sigcontext )
          * fire for ILL since we deliver via setup_exception). One-shot. */
         {
             static volatile int ill_dumped = 0;
-            if (__sync_bool_compare_and_swap(&ill_dumped, 0, 1)) {
+            if (madeira_jit_dump_enabled() && __sync_bool_compare_and_swap(&ill_dumped, 0, 1)) {
                 extern void *ios_jit_rw_base_global;
                 extern size_t ios_jit_pool_size_global;
                 if (ios_jit_rw_base_global && ios_jit_pool_size_global) {

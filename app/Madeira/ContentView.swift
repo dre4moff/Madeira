@@ -1255,6 +1255,7 @@ struct ContentView: View {
                 if library.enabled && library.current == nil { MetalHostView.shared.isHidden = true }
             }
             .onAppear {
+                MadeiraConfig.applyEarlyRuntimeProfilingPolicy()
                 jit_install_trap_handler()
                 entitlements = EntitlementStatus.check()
                 logEntitlementStatus()
@@ -2727,7 +2728,7 @@ struct ContentView: View {
                         logStore.log("madeira-d3d12: M1 canary FAILED (\(fails) checks)", level: .error)
                     }
                 } else {
-                    logStore.log("madeira-d3d12: gate off (madeira.cfg d3d12 \(raw == nil ? "unset" : "= '\(val)'"))", level: .debug)
+                    logStore.log("madeira-d3d12: optional M1 diagnostic canary skipped (madeira.cfg d3d12 \(raw == nil ? "unset" : "= '\(val)'")); the game D3D12 backend remains available", level: .debug)
                 }
             }
 

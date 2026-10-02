@@ -12,6 +12,33 @@ TESTS="$REPO_ROOT/madeira-d3d12/tests/windows"
 OUT="${OUT:-$REPO_ROOT/build/madeira-d3d12/out-pe}"
 mkdir -p "$OUT"
 
+# A partial graphics rebuild also works after generated DXMT outputs were
+# cleaned. Recreate only the import library from the already bundled bridge;
+# never relink or replace that bridge to build this DLL.
+IMPORT_DIR="$REPO_ROOT/dxmt/build-arm64ec/src/winemetal"
+if [ ! -f "$IMPORT_DIR/libwinemetal.dll.a" ]; then
+    IMPORT_DIR="$OUT/imports"
+    mkdir -p "$IMPORT_DIR"
+    "$MINGW/llvm-readobj" --coff-exports "$REPO_ROOT/app/Madeira/arm64ec-windows/winemetal.dll" > "$IMPORT_DIR/exports.txt"
+    python3 - "$IMPORT_DIR" <<'PY'
+from pathlib import Path
+import re, sys
+p = Path(sys.argv[1])
+names = re.findall(r'^  Name: (\S+)$', (p / 'exports.txt').read_text(), re.M)
+assert names and len(names) == len(set(names)), 'Missing/duplicate bridge exports'
+(p / 'winemetal.def').write_text('LIBRARY winemetal.dll\nEXPORTS\n' + '\n'.join(names) + '\n')
+PY
+    "$MINGW/arm64ec-w64-mingw32-dlltool" -d "$IMPORT_DIR/winemetal.def" -l "$IMPORT_DIR/libwinemetal.dll.a"
+fi
+
+SHADER_DIR="$REPO_ROOT/build/dxmt-ios/shader-headers"
+if [ ! -f "$SHADER_DIR/dxmt_command.h" ]; then
+    mkdir -p "$SHADER_DIR"
+    xcrun -sdk macosx metal -o "$SHADER_DIR/dxmt_command.air" -c "$REPO_ROOT/dxmt/src/dxmt/dxmt_command.metal"
+    xcrun -sdk macosx metallib -o "$SHADER_DIR/dxmt_command.metallib" "$SHADER_DIR/dxmt_command.air"
+    xxd -n dxmt_command -i "$SHADER_DIR/dxmt_command.metallib" > "$SHADER_DIR/dxmt_command.h"
+fi
+
 # Regenerate the stub tables so a toolchain header update cannot silently leave
 # the vtables the wrong length.
 python3 "$SRC/gen_vtables.py" \
@@ -22,7 +49,7 @@ echo "=== madeira_d3d12.dll (arm64ec) ==="
 "$MINGW/arm64ec-w64-mingw32-clang" -shared -O2 -Wall \
     -o "$OUT/madeira_d3d12.dll" "$SRC/madeira_d3d12.c" "$SRC/d3d12.def" \
     -I"$SRC" -I"$REPO_ROOT/build/dxmt-ios/shader-headers" -I"$REPO_ROOT/dxmt/include" -I"$REPO_ROOT/madeira-d3d12/src" -I"$REPO_ROOT/dxmt/src/winemetal" \
-    -L"$REPO_ROOT/dxmt/build-arm64ec/src/winemetal" -lwinemetal \
+    -L"$IMPORT_DIR" -lwinemetal \
     -luuid -lole32
 echo "  built $(ls -l "$OUT/madeira_d3d12.dll" | awk '{print $5}') bytes"
 # The same binary also ships as d3d12.dll (ml849): the engine reaches it through
@@ -32,6 +59,7 @@ echo "  exports: $("$MINGW/llvm-objdump" --private-headers "$OUT/d3d12.dll" 2>/d
 
 if [ "${1:-}" = "--dll-only" ]; then
     cp "$OUT/d3d12.dll" "$REPO_ROOT/app/Madeira/arm64ec-windows/d3d12.dll"
+    cp "$OUT/madeira_d3d12.dll" "$REPO_ROOT/app/Madeira/arm64ec-windows/madeira_d3d12.dll"
     exit 0
 fi
 

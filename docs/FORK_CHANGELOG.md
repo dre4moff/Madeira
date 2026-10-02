@@ -1,4 +1,4 @@
-# Complete fork changes — Madeira 0.1.1 / r19
+# Complete fork changes — Madeira 0.1.1 / r20
 
 This unofficial fork is based on Will Faust's official `v0.1.1`
 (`ca3183ea3dfb0fd706aff1bea2abb871b5d27aec`). Original copyright and licenses
@@ -8,6 +8,13 @@ The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
 
 ## Compatibility and controls
+
+- **r20 D3D12 startup corrections:** repair Metal event lifetime during device
+  destruction, report real device-removal status, reclaim all retired heaps and
+  ring buffers, and make full JIT crash dumps explicitly opt-in. Startup cleanup
+  removes obsolete dumps while preserving shader caches. The r20 IPA is an
+  optimized Release with separate symbols and hidden profiling controls.
+  [Diagnosis, validation and remaining limitations](R20_D3D12_STARTUP.md).
 
 - **Per-game Native VC++ Runtime:** saves an independent preference and applies
   `native,builtin` overrides for `msvcp140`, `msvcp140_1`, `msvcp140_2`,

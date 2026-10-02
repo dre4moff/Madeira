@@ -5392,6 +5392,14 @@ static HRESULT STDMETHODCALLTYPE device_CheckFeatureSupport(ID3D12Device *This,
     }
 }
 static ULONG STDMETHODCALLTYPE device_AddRef(ID3D12Device *This) { return mad_addref((struct mad_obj *)This); }
+/* Engines poll this while waiting for fences. An E_NOTIMPL stub falsely
+ * reports a healthy device as failed and sends UE into its fatal-error path. */
+static HRESULT STDMETHODCALLTYPE device_GetDeviceRemovedReason(ID3D12Device10 *This) {
+    struct mad_device *d = (struct mad_device *)This;
+    if (InterlockedCompareExchange(&d->device_lost, 0, 0)) return DXGI_ERROR_DEVICE_REMOVED;
+    if (InterlockedCompareExchange64(&d->gpu_serial_failed, 0, 0)) return DXGI_ERROR_DEVICE_HUNG;
+    return S_OK;
+}
 static ULONG STDMETHODCALLTYPE device_Release(ID3D12Device *This) {
     struct mad_device *d = (struct mad_device *)This;
     LONG n = InterlockedDecrement(&d->refs);
@@ -5406,7 +5414,9 @@ static ULONG STDMETHODCALLTYPE device_Release(ID3D12Device *This) {
             CloseHandle(d->fence_thread); CloseHandle(d->fence_wake);
             d->fence_thread = NULL;
         }
-        if (d->gpu_event) NSObject_release(d->gpu_event);
+        /* Keep the timeline alive through heap reclamation. The old ordering
+         * released it first, then mad_mheap_reclaim queried the freed object
+         * even when there were no retired heaps (UE adapter probing). */
         {   /* ml1072: the runtime's texture heaps die with the device */
             unsigned k;
             if (g_hp_dev == d) g_hp_dev = NULL;
@@ -5416,6 +5426,9 @@ static ULONG STDMETHODCALLTYPE device_Release(ID3D12Device *This) {
             free(d->theaps); free(d->hret);
             DeleteCriticalSection(&d->heap_lock);
         }
+        for (unsigned k = 0; k < d->nring_pool; k++) NSObject_release(d->ring_pool[k].buf);
+        for (unsigned k = 0; k < d->nring_retired; k++) NSObject_release(d->ring_retired[k].buf);
+        if (d->gpu_event) { NSObject_release(d->gpu_event); d->gpu_event = 0; }
         DeleteCriticalSection(&d->fence_lock); DeleteCriticalSection(&d->ring_lock);
         free(d->fence_jobs); free(d->ring_pool); free(d->ring_retired);
         /* These were retained on creation and were previously leaked. */
@@ -5780,7 +5793,11 @@ static void mad_mheap_reclaim(struct mad_device *d, int all) {
     obj_handle_t done_list[64]; void *done_mem[64]; unsigned nd = 0, i = 0;
     UINT64 done;
     if (!d) return;
-    done = mad_gpu_completed(d);
+    /* Teardown drains everything; it must not query a timeline that may have
+     * already been removed. Normal reclamation still waits for GPU progress. */
+    done = all ? ~(UINT64)0 : mad_gpu_completed(d);
+    do {
+    nd = 0; i = 0;
     EnterCriticalSection(&d->heap_lock);
     while (i < d->nmhret && nd < 64) {
         if (all || d->mhret[i].serial + 2 <= done) { done_list[nd] = d->mhret[i].heap; done_mem[nd++] = d->mhret[i].mem; d->mhret[i] = d->mhret[--d->nmhret]; }
@@ -5791,6 +5808,7 @@ static void mad_mheap_reclaim(struct mad_device *d, int all) {
         if (done_list[i]) { mad_unresident(d, done_list[i]); NSObject_release(done_list[i]); }
         if (done_mem[i]) VirtualFree(done_mem[i], 0, MEM_RELEASE);   /* ml1154: a file-backed CPU-visible buffer's storage */
     }
+    } while (all && d->nmhret);  /* bounded batches, including more than 64 heaps */
 }
 static void mad_hp_reclaim_locked(struct mad_device *d) {
     UINT64 done = mad_gpu_completed(d); unsigned i = 0;
@@ -10569,6 +10587,7 @@ static void build_vtables(void) {
     g_device_vtbl.GetDescriptorHandleIncrementSize = (void *)device_GetDescriptorHandleIncrementSize;
     g_device_vtbl.CreateGraphicsPipelineState = (void *)device_CreateGraphicsPipelineState;
     g_device_vtbl.CheckFeatureSupport = (void *)device_CheckFeatureSupport;
+    g_device_vtbl.GetDeviceRemovedReason = device_GetDeviceRemovedReason;
 
     madeira_fill_ID3D12CommandQueue(&g_queue_vtbl);
     g_queue_vtbl.GetDevice = queue_GetDevice;

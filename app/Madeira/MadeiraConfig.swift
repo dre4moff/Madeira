@@ -68,7 +68,7 @@ enum MadeiraConfig {
     /// two keys before allocating the JIT pool or starting wineserver.
     static func applyEarlyRuntimeProfilingPolicy() {
         setenv("MADEIRA_QUIET", "1", 1)
-        let names = ["MADEIRA_QUIET", "MADEIRA_RUNTIME_PROFILING", "MADEIRA_BOTTLENECK_STATS"]
+        let names = ["MADEIRA_QUIET", "MADEIRA_RUNTIME_PROFILING", "MADEIRA_BOTTLENECK_STATS", "MADEIRA_JIT_DUMP"]
         if present {
             let values = all()
             for name in names {

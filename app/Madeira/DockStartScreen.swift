@@ -230,6 +230,13 @@ enum DockStartStatus {
         return (installerProgress ?? "One-time installs finished.") + "\n" + starting
     }
 
+    /// An unreturned guest call can outlive Dock's own 90-second timeout.
+    /// This only surfaces recovery controls; it never treats a wait as a login.
+    static func authUnresponsive(_ fields: [String: String], waited: Double) -> Bool {
+        waited >= 120 && fields["session-native-token-submitted"] == "1" &&
+            fields["session-authenticated-online"] != "1" && fields["probe-result"] == nil
+    }
+
     /// The host has started (its first report field): the one-time installs are over.
     static func hostStarted(_ fields: [String: String]) -> Bool { fields["probe-start-bits"] != nil }
 
@@ -272,6 +279,8 @@ final class DockStartScreen: ObservableObject {
     private var hostStarted = false
     private var exitObserved = false
     private var started = Date()
+    private var authSubmittedAt: Date?
+    private var authStallReported = false
     private let places = SteamLaunchScene.Places.standard
 
     /// A library session begins; `game` is set for a Dock start.
@@ -279,6 +288,7 @@ final class DockStartScreen: ObservableObject {
         endHold(reason: nil)
         active = game != nil; appID = game?.id; failure = nil
         exitObserved = false; hostStarted = false; early = []; started = start
+        authSubmittedAt = nil; authStallReported = false
         guard let game, MadeiraConfig.flag("MADEIRA_DOCK_HIDE_DESKTOP") else { return }   // 0: a Dock start's starting screen ends on the desktop's first frame, as before
         let hold = SteamLaunchHold(autoReveal: MadeiraConfig.flag("MADEIRA_DOCK_AUTO_REVEAL"))   // 0: a window that may need the user never reveals the desktop by itself (Show desktop still does)
         self.hold = hold; sceneLines = 0; holding = true
@@ -302,6 +312,18 @@ final class DockStartScreen: ObservableObject {
         if !exitObserved && MadeiraConfig.flag("MADEIRA_DOCK_STATUS") {   // 0: the starting screen does not watch the host's result
             let current = MainActor.assumeIsolated { MadeiraDock.pollReport() }
             report = current
+            if current.fields["session-native-token-submitted"] == "1", authSubmittedAt == nil {
+                authSubmittedAt = Date()
+            }
+            if current.fields["session-authenticated-online"] == "1" {
+                authSubmittedAt = nil
+                if authStallReported && !exitObserved { failure = nil }
+            } else if !authStallReported, let submitted = authSubmittedAt,
+                      DockStartStatus.authUnresponsive(current.fields, waited: Date().timeIntervalSince(submitted)) {
+                authStallReported = true
+                failure = "Steam sign-in is not responding. Close this session and try again. Export the log if it repeats."
+                LogStore.shared.log("[dock-auth-stall] waited=120 step=\(current.fields["session-auth-step"] ?? "unknown") state=\(current.fields["session-auth-state"] ?? "unknown")", level: .error)
+            }
             if current.result != nil {
                 exitObserved = true
                 if let words = DockStartStatus.failure(result: current.result, words: current.failure, launching: model.launching) {

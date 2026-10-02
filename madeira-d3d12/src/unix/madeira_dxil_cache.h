@@ -356,8 +356,8 @@ static inline int mad_dxc_file_store(const char *path, const void *blob, size_t 
     return 0;
 }
 
-/* Size bound: when the entries with this extension exceed `cap` bytes, delete
- * the least recently used until they fit in `target`. Only files named
+/* Soft size target: above `cap`, evict entries unused for 30 days towards
+ * `target`. Warm shaders survive even above the target. Only files named
  * "<16 hex>.<ext>" are considered; nothing else in the directory is touched.
  * Returns the bytes left; *nfiles_out gets the count left. */
 struct mad_dxc_prune_ent { time_t mtime; uint64_t size; char name[32]; };
@@ -379,6 +379,7 @@ static inline uint64_t mad_dxc_prune(const char *dir, const char *ext, uint64_t 
     size_t n = 0, capn = 0, extlen = strlen(ext);
     uint64_t total = 0;
     unsigned removed = 0;
+    time_t cutoff = time(NULL) - 30 * 24 * 3600;
     char path[1300];
 
     if (nfiles_out) *nfiles_out = 0;
@@ -391,7 +392,7 @@ static inline uint64_t mad_dxc_prune(const char *dir, const char *ext, uint64_t 
             de->d_name[16] != '.' || strcmp(de->d_name + 17, ext)) continue;
         if (strspn(de->d_name, "0123456789abcdef") != 16) continue;
         if (snprintf(path, sizeof path, "%s/%s", dir, de->d_name) >= (int)sizeof path) continue;
-        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        if (lstat(path, &st) != 0 || !S_ISREG(st.st_mode)) continue;
         if (n == capn) {
             size_t nc = capn ? capn * 2 : 256;
             struct mad_dxc_prune_ent *nv = (struct mad_dxc_prune_ent *)realloc(v, nc * sizeof *v);
@@ -407,6 +408,7 @@ static inline uint64_t mad_dxc_prune(const char *dir, const char *ext, uint64_t 
     if (total > cap && n) {
         qsort(v, n, sizeof *v, mad_dxc_prune_cmp);
         for (size_t i = 0; i < n && total > target; i++) {
+            if (v[i].mtime >= cutoff) continue;
             if (snprintf(path, sizeof path, "%s/%s", dir, v[i].name) >= (int)sizeof path) continue;
             if (unlink(path) == 0) { total -= v[i].size; removed++; }
         }

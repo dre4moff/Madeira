@@ -1,9 +1,8 @@
 #!/bin/bash
 # Build madeira_d3d12.dll as ARM64EC, plus the x64 test executable.
 #
-# A SEPARATE DLL, not a replacement for the bundled d3d12.dll: the design says
-# not to overwrite the shipped loader as the first experiment, and keeping it
-# separate means the D3D11 path cannot regress while this is unfinished.
+# --dll-only stages the existing Madeira D3D12 engine into the local app.
+# Without it, also compile the synthetic Windows probes (never run them here).
 set -eu
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$DIR/../.." && pwd)"
@@ -22,7 +21,7 @@ python3 "$SRC/gen_vtables.py" \
 echo "=== madeira_d3d12.dll (arm64ec) ==="
 "$MINGW/arm64ec-w64-mingw32-clang" -shared -O2 -Wall \
     -o "$OUT/madeira_d3d12.dll" "$SRC/madeira_d3d12.c" "$SRC/d3d12.def" \
-    -I"$SRC" -I"$REPO_ROOT/madeira-d3d12/src" -I"$REPO_ROOT/dxmt/src/winemetal" \
+    -I"$SRC" -I"$REPO_ROOT/build/dxmt-ios/shader-headers" -I"$REPO_ROOT/dxmt/include" -I"$REPO_ROOT/madeira-d3d12/src" -I"$REPO_ROOT/dxmt/src/winemetal" \
     -L"$REPO_ROOT/dxmt/build-arm64ec/src/winemetal" -lwinemetal \
     -luuid -lole32
 echo "  built $(ls -l "$OUT/madeira_d3d12.dll" | awk '{print $5}') bytes"
@@ -30,6 +29,11 @@ echo "  built $(ls -l "$OUT/madeira_d3d12.dll" | awk '{print $5}') bytes"
 # the standard entry points, while the tests keep loading it by the old name.
 cp "$OUT/madeira_d3d12.dll" "$OUT/d3d12.dll"
 echo "  exports: $("$MINGW/llvm-objdump" --private-headers "$OUT/d3d12.dll" 2>/dev/null | grep -cE '^ +[0-9]+ +0x[0-9a-f]+ +D3D12|^ +[0-9]+ .*D3D12')  (ordinal 101/102 pinned by d3d12.def)"
+
+if [ "${1:-}" = "--dll-only" ]; then
+    cp "$OUT/d3d12.dll" "$REPO_ROOT/app/Madeira/arm64ec-windows/d3d12.dll"
+    exit 0
+fi
 
 echo "=== d3d12-m2-x64.exe (x86_64 guest) ==="
 "$MINGW/x86_64-w64-mingw32-clang" -O2 -Wall \

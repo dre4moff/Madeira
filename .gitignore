@@ -158,3 +158,14 @@ app/Madeira/i386-windows/*
 # Madeira Dock: built from madeira-dock by build/madeira-dock/build.sh
 app/Madeira/arm64ec-windows/dockhost.exe
 app/Madeira/arm64ec-windows/dock-notices.txt
+
+# Python synthetic test bytecode
+__pycache__/
+*.pyc
+build/dxmt-ios/arm64ec-nvext-generated.ini
+
+# Local releases, profiling evidence and private runtime terms
+.build/
+dist/
+app/Madeira/x86_64-vcruntime/MICROSOFT-LICENSE.rtf
+build/wineserver/base-obj/

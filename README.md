@@ -1,3 +1,20 @@
+# Madeira — dre4moff compatibility and performance fork
+
+Unofficial fork based on [Will Faust's Madeira 0.1.1](https://github.com/willfaust/Madeira/releases/tag/v0.1.1).
+The original app and engines are credited below. This fork adds per-game VC++
+runtime and DX11 controls, controller integration fixes, experimental DLSS-to-
+MetalFX bridges for DX11/DX12, cache maintenance and measured-overhead reductions.
+
+**Start here:** [complete fork changes and evidence](docs/FORK_CHANGELOG.md),
+[unsigned release and personal VC runtime setup](docs/FORK_RELEASE.md),
+[performance analysis](docs/R19_PERFORMANCE.md).
+The latest patch is compiled and synthetically tested; higher on-device FPS and
+universal DLSS compatibility are not established. Microsoft runtime DLLs are
+not distributed. FEX remains at the original Madeira pin, with no forked FEX
+source contributions. Changes in this fork were prepared with AI assistance.
+
+---
+
 <p align="center">
   <img src="docs/assets/banner.png" alt="Madeira — Bringing PC gaming to your iPhone." width="100%">
 </p>
@@ -5,7 +22,7 @@
 <p align="center">
   <a href="https://discord.gg/4t5mNjwCn7"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Finvites%2F4t5mNjwCn7%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&suffix=%20members&label=Discord&logo=discord&logoColor=white&color=5865F2&style=for-the-badge" alt="Join the Madeira Discord"></a>
   &nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/willfaust/Madeira/releases"><img src="https://img.shields.io/github/v/release/willfaust/Madeira?label=Release&style=for-the-badge&color=brightgreen" alt="Latest release"></a>
+  <a href="https://github.com/dre4moff/Madeira/releases"><img src="https://img.shields.io/github/v/release/dre4moff/Madeira?label=Release&style=for-the-badge&color=brightgreen" alt="Latest release"></a>
   &nbsp;&nbsp;&nbsp;
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--or--later-yellow?style=for-the-badge" alt="License: GPL-3.0-or-later"></a>
 </p>
@@ -54,7 +71,7 @@ Because JIT needs a debugger, Madeira cannot be offered on the App Store.
 
 ## Installing
 
-1. Download the IPA from the [latest release](https://github.com/willfaust/Madeira/releases).
+1. Download the IPA from the [latest release](https://github.com/dre4moff/Madeira/releases).
 2. Sideload it with your own Apple ID using SideStore, AltStore, Sideloadly,
    Plume or a similar tool.
 3. Open Madeira and enable JIT with StikDebug.

@@ -109,7 +109,12 @@ struct FPSOverlay: View {
     /// winemetal_unix.c's _MTLCommandBuffer_presentDrawable).
     @State private var vsyncMode: Int32 = 1
     /// Ring buffer of (timestamp, count) pairs, 100ms cadence, 5s window.
-    @State private var samples: [(t: CFAbsoluteTime, c: UInt64)] = []
+    // Sampling does not publish UI state. Only the 250ms readout tick does;
+    // a 100ms append must not rebuild the SwiftUI overlay each time.
+    private final class SampleBuffer {
+        var values: [(t: CFAbsoluteTime, c: UInt64)] = []
+    }
+    @State private var sampleBuffer = SampleBuffer()
     private let bufferCapacity = 50  // 5s @ 100ms
     /// ml606: live phys_footprint in MB, refreshed on the 250ms display tick.
     @State private var memMB: Int = 0
@@ -329,7 +334,7 @@ struct FPSOverlay: View {
         stopTimers()
         let now = CFAbsoluteTimeGetCurrent()
         let c = madeira_get_present_count()
-        samples = [(now, c)]
+        sampleBuffer.values = [(now, c)]
         presentCount = c
         vsyncMode = madeira_get_vsync_locked()
         ProMotionIntent.apply(mode: vsyncMode)
@@ -338,14 +343,15 @@ struct FPSOverlay: View {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             let t = CFAbsoluteTimeGetCurrent()
             let cur = madeira_get_present_count()
-            samples.append((t, cur))
-            if samples.count > bufferCapacity { samples.removeFirst() }
-            presentCount = cur
+            sampleBuffer.values.append((t, cur))
+            if sampleBuffer.values.count > bufferCapacity { sampleBuffer.values.removeFirst() }
         }
 
         // 250ms display refresh — computes adaptive-window FPS
         memMB = readFootprintMB()
         displayTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
+            guard visible else { return }
+            presentCount = sampleBuffer.values.last?.c ?? presentCount
             fps = computeAdaptiveFPS()
             // ml606: piggybacks on the existing tick, so it costs one extra
             // task_info per 250ms and no additional SwiftUI invalidation.
@@ -369,6 +375,7 @@ struct FPSOverlay: View {
     /// (2026-07-04, cost a day of pacing-hunt confusion). ≥1s gives 1-FPS
     /// resolution; still responsive for a debug readout.
     private func computeAdaptiveFPS() -> Double {
+        let samples = sampleBuffer.values
         guard samples.count >= 2 else { return 0 }
         let latest = samples.last!
         // Walk backwards

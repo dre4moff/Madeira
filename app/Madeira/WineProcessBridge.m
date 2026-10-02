@@ -19,7 +19,10 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <dirent.h>
+#include "../../build/graphics_profile.h"
 #include "../../build/madeira_cfg.h"   /* ml1095: one config file */
+#include "../../build/vcruntime_overrides.h"
+#include "../../build/ntdll-unix/runtime_profiling.h"
 #include <sys/stat.h>
 #include <limits.h>
 #include <string.h>
@@ -775,12 +778,35 @@ static void madeira_publish_host_probe(void)
 
 static void *wine_process_thread(void *arg) {
     @autoreleasepool {
+        // Capture the selected game's choice before global env configuration.
+        const char *metalFXChoice = getenv("MADEIRA_GAME_METALFX_FACTOR");
+        const double metalFXFactor = metalFXChoice ? strtod(metalFXChoice, NULL) : 0;
+        unsetenv("MADEIRA_GAME_METALFX_FACTOR");
+        char metalFXOutput[32] = {0};
+        const char *metalFXOutputChoice = getenv("MADEIRA_GAME_METALFX_OUTPUT");
+        if (metalFXOutputChoice) snprintf(metalFXOutput, sizeof(metalFXOutput), "%s", metalFXOutputChoice);
+        unsetenv("MADEIRA_GAME_METALFX_OUTPUT");
+        const char *dlssChoice = getenv("MADEIRA_GAME_METALFX_DLSS");
+        const int metalFXDLSS = dlssChoice && !strcmp(dlssChoice, "1") && madeira_supports_temporal_upscaling();
+        unsetenv("MADEIRA_GAME_METALFX_DLSS");
+        madeira_restore_dlss_overrides();
+        const char *vcRuntimeChoice = getenv("MADEIRA_GAME_NATIVE_VCRUNTIME");
+        const int nativeVCRuntime = vcRuntimeChoice && !strcmp(vcRuntimeChoice, "1");
+        unsetenv("MADEIRA_GAME_NATIVE_VCRUNTIME");
+        const char *directX11Choice = getenv("MADEIRA_GAME_DIRECTX11");
+        const BOOL forceDirectX11 = directX11Choice && *directX11Choice == '1';
+        unsetenv("MADEIRA_GAME_DIRECTX11");
         /* Perf: the guest main thread runs ON this pthread. Promote to
          * USER_INTERACTIVE so it schedules on P-cores with minimal kernel
          * timer coalescing (same rationale as start_thread in
          * thread_ios.c — default QoS costs tens of ms of sleep leeway). */
         pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
         LOG("Wine process thread started");
+#if defined(__OPTIMIZE__)
+        fprintf(stderr, "[build-mode] native-optimization=on\n");
+#else
+        fprintf(stderr, "[build-mode] native-optimization=off\n");
+#endif
 
         /* ml588: seeding itself now happens in wineserver_start(), BEFORE the
          * server loads the registry. Kept here as a safety net for any path
@@ -893,6 +919,28 @@ static void *wine_process_thread(void *arg) {
          * HEAT — thermals are what cap ProMotion at 60. COMMENT THIS OUT
          * for diagnostic/profiling sessions. */
         setenv("MADEIRA_QUIET", "1", 1);
+
+        /* Full resource censuses scan and write on the DXMT encode thread.
+         * Use its existing 10-second gate for x64 games too; the first report
+         * and memory warnings still pass. Explicit environment/config wins. */
+        setenv("DXMT_CENSUS_THROTTLE", "1", 0);
+
+        /* Use DXMT's existing own-address wait for x64/ARM64EC queue handoffs.
+         * Avoid libc++'s shared contention table/API-set lookup fallback.
+         * Config exports below still override both performance defaults. */
+        setenv("DXMT_WAIT_ON_ADDRESS", "1", 0);
+        /* Yield only after sustained polling of a still-pending GPU query;
+         * ordinary ready/short queries never enter the scheduler. */
+        setenv("DXMT_QUERY_POLL_YIELD", "1", 0);
+
+        /* Relative shader/Metal cache paths must resolve inside the iOS
+         * sandbox for x64 callers too. Keep explicit paths and opt-outs. */
+    setenv("DXMT_IOS_CACHE_DIR", "1", 0);
+    // Bounded shader-lookup telemetry makes actual reuse visible. User opt-out
+    // remains available; reports are lookup aggregates, never per draw/frame.
+    setenv("DXMT_CACHE_STATS", "1", 0);
+        // Unified-memory upload batches keep the GPU completion fences intact.
+        setenv("DXMT_DIRECT_TEXTURE_UPLOAD", "1", 0);
 
         /* task #34 share/purge-probe experiments CONCLUDED 2026-07-14
          * (remap-sharing dead; pool not purgeable; ml76 wall = mismatched
@@ -1061,6 +1109,7 @@ static void *wine_process_thread(void *arg) {
                     if ([[NSFileManager defaultManager] createFileAtPath:swapPath contents:nil attributes:@{NSFileProtectionKey: NSFileProtectionNone}]) {
                         setenv("MADEIRA_SWAP_FILE", swapPath.UTF8String, 1);
                         setenv("MADEIRA_SWAP_MB", [NSString stringWithFormat:@"%ld", capMB].UTF8String, 1);
+                        setenv("MADEIRA_SWAP_EPHEMERAL", "1", 1);
                         LOG("ml1077 swap tier armed: %{public}s, %ld MB", swapPath.UTF8String, capMB);
                         fprintf(stderr, "[swap] ml1077 app: backing file %s, cap %ld MB\n", swapPath.UTF8String, capMB);
                     }
@@ -1112,6 +1161,25 @@ static void *wine_process_thread(void *arg) {
                 }
             }
         }
+
+        // Session-only Wine load order, inherited by Steam/Dock's children.
+        // Applying after global config preserves other DLL overrides while the
+        // game's switch takes precedence for these five libraries only.
+        madeira_apply_vcruntime_overrides(nativeVCRuntime);
+        madeira_apply_metalfx_profile(metalFXFactor);
+        madeira_apply_metalfx_output(metalFXFactor, metalFXOutput);
+        madeira_apply_dlss_profile(metalFXDLSS);
+        // Steam's LaunchApp receives the game's flag, not explorer's command
+        // line. Clear it for every other profile to prevent cross-game leaks.
+        if (forceDirectX11) setenv("MADEIRA_STEAM_HOST_DIRECTX11", "1", 1);
+        else unsetenv("MADEIRA_STEAM_HOST_DIRECTX11");
+        dprintf(STDERR_FILENO, "[graphics-profile] DirectX 11 request=%d (Steam user args: %s)\n",
+                forceDirectX11, forceDirectX11 ? "-dx11" : "default");
+        if (nativeVCRuntime)
+            dprintf(STDERR_FILENO, "[vc-runtime] native,builtin: %s\n", getenv("WINEDLLOVERRIDES") ?: "");
+        dprintf(STDERR_FILENO, "[performance-policy] resource-census=%s ios-shader-cache=%s runtime-profiling=%d (VM/heap/wait-history diagnostics follow profiling; JIT warming/recovery retained)\n",
+                getenv("DXMT_CENSUS_THROTTLE") ?: "default",
+                getenv("DXMT_IOS_CACHE_DIR") ?: "default", madeira_runtime_profiling_enabled());
 
         // Steam S0: root CA trust. iOS has no API to enumerate system
         // roots, so crypt32's unix rootstore (crypt32_unixlib_ios.c)
@@ -1178,9 +1246,23 @@ static void *wine_process_thread(void *arg) {
             NSString *dllSource = [bundlePath stringByAppendingPathComponent:[NSString stringWithUTF8String:bundle_subdir]];
             NSString *prefix = [NSString stringWithUTF8String:g_prefix_path];
             NSString *sys32Dir = [prefix stringByAppendingPathComponent:@"drive_c/windows/system32"];
+            NSString *sysx64Dir = [prefix stringByAppendingPathComponent:@"drive_c/windows/sysx64"];
             NSFileManager *fm = [NSFileManager defaultManager];
 
             [fm createDirectoryAtPath:sys32Dir withIntermediateDirectories:YES attributes:nil error:nil];
+
+            // Remove only links owned by our optional native runtime, including
+            // a stale bundle path after reinstall. User-installed DLLs stay put.
+            // Some supplemental runtime DLLs have no Wine counterpart, so the
+            // normal farm refresh alone would otherwise leave them behind.
+            for (NSString *runtimeDir in @[sys32Dir, sysx64Dir]) {
+                for (NSString *dll in [fm contentsOfDirectoryAtPath:runtimeDir error:nil]) {
+                    NSString *dst = [runtimeDir stringByAppendingPathComponent:dll];
+                    NSString *target = [fm destinationOfSymbolicLinkAtPath:dst error:nil];
+                    if ([target containsString:@"/x86_64-vcruntime/"])
+                        [fm removeItemAtPath:dst error:nil];
+                }
+            }
 
             NSArray *dlls = [fm contentsOfDirectoryAtPath:dllSource error:nil];
             int linked = 0;
@@ -1329,63 +1411,29 @@ static void *wine_process_thread(void *arg) {
                         repaired, already);
             }
 
-            // Layer Microsoft's real VC++ Runtime DLLs ON TOP of the ARM64EC
-            // bundle (only for x86_64 guests). These overwrite Wine's stub
-            // builtins — Wine then loads the real MS x86_64 implementation
-            // (via FEX) instead of its partial ARM64EC reimplementation.
-            //
-            // Same pattern Proton/Winlator use: drop in the real concrt140 /
-            // msvcp140 / vcruntime140 binaries from VC_redist.x64.exe so games
-            // that exercise the full C++ runtime (parallel_for, atomic_wait,
-            // <filesystem>, etc.) don't trip __wine_unimplemented stubs.
-            if (use_arm64ec) {
+            // x64 children of an ARM64 desktop/Dock session resolve colliding
+            // DLL names through sysx64. Stage there for every enabled profile,
+            // even when the initial executable is explorer.exe (not ARM64EC).
+            // Only an EC session's system32 can also receive native x64 DLLs;
+            // keep the ARM64 host and syswow64 libraries architecture-correct.
+            // The cleanup and farm refresh above restore both paths when off.
+            if (nativeVCRuntime) {
                 NSString *vcrtSource = [bundlePath stringByAppendingPathComponent:@"x86_64-vcruntime"];
                 NSArray *vcrtDlls = [fm contentsOfDirectoryAtPath:vcrtSource error:nil];
-                int vcrtLinked = 0, vcrtSkipped = 0;
-                for (NSString *dll in vcrtDlls) {
-                    /* NOTE 2026-07-03 (late): retried lifting BOTH exemptions
-                     * below after the fast-write bisect, hoping trap-mode had
-                     * fixed the corruption class (and to keep hot CRT calls
-                     * like memcpy inside the JIT — they cost a full x64→EC
-                     * round trip as ARM64EC builtins, a large share of the
-                     * 57ms menu frame). Result: guest RIP jumped to junk
-                     * (0x600000010xx, lr=0xa59696ff...) right after
-                     * MSVCP140/VCRUNTIME140 loaded x86_64, before present #1.
-                     * So the x86→EC SEH/transition corruption is NOT the
-                     * fast-write bug — it's still unfixed, and these
-                     * exemptions must stay until it is. */
-                    /* Keep vcruntime140.dll as the ARM64EC builtin: its
-                     * __C_specific_handler is invoked by Wine's SEH dispatch,
-                     * and routing that through FEX corrupts x86 RSP (SEH
-                     * dispatcher's exit-thunk arg setup is broken). With the
-                     * native arm64ec vcruntime140, Wine calls the handler
-                     * directly in ARM64 — no FEX bridging on the exception
-                     * path. Other vcruntime/msvcp/concrt DLLs still overlay. */
-                    if ([[dll lowercaseString] isEqualToString:@"vcruntime140.dll"]) {
-                        vcrtSkipped++;
-                        continue;
+                NSArray *vcrtTargets = use_arm64ec ? @[sysx64Dir, sys32Dir] : @[sysx64Dir];
+                for (NSString *runtimeDir in vcrtTargets) {
+                    int vcrtLinked = 0;
+                    for (NSString *dll in vcrtDlls) {
+                        if (![[dll.pathExtension lowercaseString] isEqualToString:@"dll"]) continue;
+                        NSString *src = [vcrtSource stringByAppendingPathComponent:dll];
+                        NSString *dst = [runtimeDir stringByAppendingPathComponent:dll];
+                        [fm removeItemAtPath:dst error:nil];
+                        if ([fm createSymbolicLinkAtPath:dst withDestinationPath:src error:nil])
+                            vcrtLinked++;
                     }
-                    /* msvcp140.dll: same exemption as vcruntime140, found
-                     * 2026-07-03. The MS x86_64 msvcp140 throws a C++
-                     * exception during its own DllMain; the x86 throw-record
-                     * builder calls RtlPcToFileHeader cross-arch and the
-                     * exception-path exit thunk corrupts guest RSP — the
-                     * returned module base lands in the return-address slot
-                     * and RIP jumps to the MZ header (NoExec loop, no
-                     * splash). Keep the ARM64EC builtin so msvcp140's EH
-                     * runs natively, like vcruntime140. */
-                    if ([[dll lowercaseString] isEqualToString:@"msvcp140.dll"]) {
-                        vcrtSkipped++;
-                        continue;
-                    }
-                    NSString *src = [vcrtSource stringByAppendingPathComponent:dll];
-                    NSString *dst = [sys32Dir stringByAppendingPathComponent:dll];
-                    [fm removeItemAtPath:dst error:nil];
-                    if ([fm createSymbolicLinkAtPath:dst withDestinationPath:src error:nil])
-                        vcrtLinked++;
+                    dprintf(STDERR_FILENO, "[vc-runtime] linked %d native x64 DLLs -> %s; load order native,builtin\n",
+                            vcrtLinked, runtimeDir.lastPathComponent.UTF8String);
                 }
-                LOG("Symlinked %d MS VC++ Runtime DLLs (x86_64 native) over arm64ec builtins, skipped %d", vcrtLinked, vcrtSkipped);
-                dprintf(STDERR_FILENO, "[WineProc] Symlinked %d MS VC++ Runtime DLLs over arm64ec builtins (skipped %d for native EC SEH)\n", vcrtLinked, vcrtSkipped);
             }
         }
 

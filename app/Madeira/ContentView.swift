@@ -1262,6 +1262,7 @@ struct ContentView: View {
                 DeviceDiagnostics.logStartup()
                 FrontendChoice.logStartup()
                 DeviceLoadDiagnostics.start()
+                CacheMaintenance.start()
                 // Madeira Dock: an unconsumed sign-in transfer from an earlier run goes.
                 if wine_process_is_running() == 0 { MadeiraDock.cleanup() }
             }
@@ -2329,6 +2330,13 @@ struct ContentView: View {
     /// to prepare code pages. Detach happens after Wine finishes + recovery.
     /// `profile` is a library entry whose launch profile applies to this run.
     private func runWineFullSequence(profile: LibraryEntry? = nil) {
+        // A pool borrowing the fixed-image window cannot be used by another
+        // game's session in this process, even if the usual session guard is off.
+        if StikJITHelper.executableWindowReused {
+            if profile != nil { LibraryModel.shared.launchFailed() }
+            library.restartNotice = LibraryModel.restartMessage
+            return
+        }
         guard jit_check_debugged() else {
             logStore.log("JIT not enabled. Press 'Enable JIT' first.", level: .error)
             if profile != nil { LibraryModel.shared.launchFailed() }
@@ -2341,7 +2349,9 @@ struct ContentView: View {
         MadeiraConfig.migrateLegacy { self.logStore.log($0) }
         MadeiraConfig.deleteLegacyFiles { self.logStore.log($0) }   /* ml1096: the old files go once the cfg exists */
         /* ml1990: player 1 exists before the game enumerates XInput. */
-        GamepadInput.shared.reserveSessionSlot(touchControls: TouchControlsModel.shared.offersControllerInput)
+        GamepadInput.shared.reserveSessionSlot(
+            touchControls: TouchControlsModel.shared.offersControllerInput,
+            libraryGame: profile != nil && profile?.desktop != true)
         if MadeiraConfig.present {
             let cfg = MadeiraConfig.all().sorted { $0.key < $1.key }
             logStore.log("madeira.cfg: " + (cfg.isEmpty ? "(empty)" : cfg.map { "\($0.key)=\($0.value)" }.joined(separator: " ")))
@@ -2349,6 +2359,7 @@ struct ContentView: View {
             logStore.log("madeira.cfg absent: legacy madeira-*.txt files apply")
         }
 
+        CacheMaintenance.prepareForLaunch()
         logStore.log("Running full Wine sequence...")
         DeviceDiagnostics.logLaunch()
 
@@ -2368,6 +2379,7 @@ struct ContentView: View {
         ws_log_quiet = 1
 
         DispatchQueue.global(qos: .userInitiated).async {
+            MadeiraConfig.applyEarlyRuntimeProfilingPolicy()
             // A library entry's launch profile (executable, arguments, x87
             // precision, frame limit).
             if let profile {
@@ -2627,10 +2639,22 @@ struct ContentView: View {
             winios_phase("pool-alloc-begin")
             logStore.log("Allocating \(poolSizeMB)MB JIT pool (BRK will suspend process)...")
             let t0 = CFAbsoluteTimeGetCurrent()
-            let pool = StikJITHelper.allocatePool(poolSize: poolSizeMB * 1024 * 1024)
+            var reuseExecutableWindow = false
+            if let profile, profile.desktop != true,
+               profile.nativeVCRuntime == true || profile.forceDirectX11 == true {
+                reuseExecutableWindow = JITExecutableWindowPolicy.canReuse(
+                    drive: LibraryModel.drive, relativePath: profile.relativePath,
+                    steam: profile.steamAppID != nil)
+                logStore.log("[jit-window] installed game executable check: reuse=\(reuseExecutableWindow ? 1 : 0)")
+            }
+            let pool = StikJITHelper.allocatePool(poolSize: poolSizeMB * 1024 * 1024,
+                                                 reuseExecutableWindow: reuseExecutableWindow)
             let elapsed = CFAbsoluteTimeGetCurrent() - t0
             winios_phase("pool-ready")
             logStore.log("BRK suspension lasted \(String(format: "%.2f", elapsed))s")
+            if let pool {
+                logStore.log("[jit-budget] requested=\(poolSizeMB)MB allocated=\(pool.size >> 20)MB executable-window-reused=\(StikJITHelper.executableWindowReused ? 1 : 0)")
+            }
 
             // Arena carver self-test. Documents/madeira-arena-test.txt holds
             // "churn:N", "ramp:N" or "random:N". Deliberately a SEPARATE file
@@ -3023,10 +3047,12 @@ struct ContentView: View {
                 let p = txt.lowercased().split(separator: "x").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
                 if p.count == 2, p[0] >= 640, p[1] >= 360, p[0] <= 3840, p[1] <= 2160 { width = p[0]; height = p[1] }
             }
-            // A Steam game's own Resolution (validated above) sizes its Dock desktop.
-            if let size = profile?.resolution.split(separator: "x").compactMap({ Int($0) }), size.count == 2 {
+            // Explorer must use the same render mode as the virtual monitor:
+            // the output preference would undo MetalFX's lower input at startup.
+            if let size = profile?.sessionRenderResolution.split(separator: "x").compactMap({ Int($0) }), size.count == 2 {
                 width = size[0]; height = size[1]
             }
+            logStore.log("[dock-display] desktop=\(width)x\(height) output=\(profile?.resolution ?? "default")")
             setenv("MADEIRA_EXE", "explorer.exe", 1)
             setenv("MADEIRA_ARGS", MadeiraDock.launchArguments(width: width, height: height, installers: DockInstallers.script), 1)
             setenv("MADEIRA_DESKTOP", "1", 1)
@@ -3804,7 +3830,6 @@ struct TouchControlButton: View {
     @State private var isDown = false
     @State private var dragBase: CGPoint?
     @State private var stickDir: Int = -1
-    @State private var padVector = CGSize.zero
 
     private var diameter: CGFloat { TouchControlsModel.diameter(control) }
     private var size: CGSize { TouchControlsModel.size(control) }
@@ -3869,10 +3894,13 @@ struct TouchControlButton: View {
         ZStack {
             if control.action.isPadStick {
                 ZStack {
-                    Circle().fill(.white.opacity(isDown ? 0.55 : 0.25))
-                        .frame(width: diameter * 0.42, height: diameter * 0.42)
-                        .offset(x: padVector.width * diameter * 0.29, y: padVector.height * diameter * 0.29)
-                    Text(control.action.label).font(.caption).foregroundStyle(.white.opacity(0.8))
+                    // Gameplay's moving knob and label belong to TouchPadView;
+                    // editing retains a static preview without an input surface.
+                    if m.editing {
+                        Circle().fill(.white.opacity(0.25))
+                            .frame(width: diameter * 0.42, height: diameter * 0.42)
+                        Text(control.action.label).font(.caption).foregroundStyle(.white.opacity(0.8))
+                    }
                 }
                 .frame(width: diameter, height: diameter)
                 .glassFace(GlassShape(circle: true))
@@ -3932,16 +3960,16 @@ struct TouchControlButton: View {
         }
         .overlay {
             if let action = control.action.padName, !m.editing {
-                TouchPadSurface(control: control.id, action: action) { vector, down in
-                    padVector = vector; isDown = down
+                TouchPadSurface(control: control.id, action: action) { _, down in
+                    if !control.action.isPadStick && isDown != down { isDown = down }
                 }
             }
         }
-        .onDisappear { if control.action.isPad { padVector = .zero; isDown = false } }
-        .onChange(of: m.editing) { _, _ in if control.action.isPad { padVector = .zero; isDown = false } }
-        .onChange(of: screen) { _, _ in if control.action.isPad { padVector = .zero; isDown = false } }
+        .onDisappear { if control.action.isPad { isDown = false } }
+        .onChange(of: m.editing) { _, _ in if control.action.isPad { isDown = false } }
+        .onChange(of: screen) { _, _ in if control.action.isPad { isDown = false } }
         .onChange(of: control.action) { old, new in
-            if old.isPad || new.isPad { padVector = .zero; isDown = false }
+            if old.isPad || new.isPad { isDown = false }
         }
         .position(x: CGFloat(control.nx) * screen.width,
                   y: CGFloat(control.ny) * screen.height)

@@ -118,6 +118,13 @@ func window(_ image: String, _ w: Int, _ h: Int, visible: Bool = true, drawn: Bo
 
 @main struct Checks {
     static func main() {
+        let pendingAuth = ["session-native-token-submitted": "1"]
+        require(!DockStartStatus.authUnresponsive(pendingAuth, waited: 119) &&
+                DockStartStatus.authUnresponsive(pendingAuth, waited: 120), "unreturned sign-in gets a recovery message after 120 s")
+        require(!DockStartStatus.authUnresponsive([:], waited: 200) &&
+                !DockStartStatus.authUnresponsive(pendingAuth.merging(["session-authenticated-online": "1"], uniquingKeysWith: { _, new in new }), waited: 200) &&
+                !DockStartStatus.authUnresponsive(pendingAuth.merging(["probe-result": "34"], uniquingKeysWith: { _, new in new }), waited: 200),
+                "auth recovery excludes installers, authenticated sessions and a completed host")
         typealias S = SteamLaunchScene
         let places = S.Places(clientRoot: "C:\\Program Files (x86)\\Steam")
         require(places.windows == "c:\\windows\\" && places.client == "c:\\program files (x86)\\steam\\" &&

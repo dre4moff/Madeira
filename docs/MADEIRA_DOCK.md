@@ -1,5 +1,13 @@
 # Madeira Dock
 
+## Local r14 sign-in recovery
+
+The local r14 update repairs recycled socket-family poll entries and adds bounded
+numeric sign-in checkpoints and a native message for an unreturned guest call.
+Real Steam authentication and entitlement gates remain mandatory. Details and
+synthetic-only validation: [R14_STEAM_AUTH.md](R14_STEAM_AUTH.md). Device recovery
+still requires a user test.
+
 Madeira Dock starts a Steam game that Steam's client has installed in the
 prefix, through **Valve's genuine Windows Steam client**, without the Steam
 desktop window, its Chromium web helper or its library UI.

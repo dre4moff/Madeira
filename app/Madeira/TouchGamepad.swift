@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import QuartzCore
 
 // MARK: - Pure touch state (also compiled by the host regression test)
 struct GamepadSample: Equatable, Sendable {
@@ -120,11 +121,22 @@ final class TouchPadView: UIView {
     private var action = ""
     private var changed: ((CGSize, Bool) -> Void)?
     private var previousSize = CGSize.zero
+    private let knob = UIView()
+    private let stickLabel = UILabel()
+    private var vector = CGSize.zero
+    private var down = false
 
     init() {
         super.init(frame: .zero)
         isMultipleTouchEnabled = true
         backgroundColor = .clear
+        knob.isUserInteractionEnabled = false
+        stickLabel.isUserInteractionEnabled = false
+        stickLabel.textAlignment = .center
+        stickLabel.font = .preferredFont(forTextStyle: .caption1)
+        stickLabel.textColor = .white.withAlphaComponent(0.8)
+        addSubview(knob)
+        addSubview(stickLabel)
         NotificationCenter.default.addObserver(self, selector: #selector(interrupted),
             name: UIApplication.willResignActiveNotification, object: nil)
     }
@@ -133,10 +145,16 @@ final class TouchPadView: UIView {
     func configure(control: UUID, action: String, changed: @escaping (CGSize, Bool) -> Void) {
         if self.control != control || self.action != action { releaseAll() }
         self.control = control; self.action = action; self.changed = changed
+        let stick = action == "LS" || action == "RS"
+        knob.isHidden = !stick
+        stickLabel.isHidden = !stick
+        stickLabel.text = action
+        updateStickFace()
     }
     override func layoutSubviews() {
         super.layoutSubviews()
         if previousSize != bounds.size { releaseAll(); previousSize = bounds.size }
+        updateStickFace()
     }
     override func didMoveToWindow() { super.didMoveToWindow(); if window == nil { releaseAll() } }
     @objc private func interrupted() { releaseAll(); changed?(.zero, false) }
@@ -145,6 +163,8 @@ final class TouchPadView: UIView {
             GamepadInput.shared.touch(owner: finger.owner, control: control, value: nil)
         }
         fingers.removeAll()
+        vector = .zero; down = false
+        updateStickFace()
     }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches {
@@ -162,7 +182,11 @@ final class TouchPadView: UIView {
                                               y: Double((finger.start.y - point.y) / radius))
             GamepadInput.shared.touch(owner: finger.owner, control: control,
                 value: TouchPadAction.sample(action, x: x, y: y))
-            changed?(CGSize(width: x, height: -y), true)
+            vector = CGSize(width: x, height: -y); down = true
+            updateStickFace()
+            // The UIKit knob moves without invalidating the surrounding
+            // SwiftUI glass graph. Guest input above still receives every event.
+            if action != "LS" && action != "RS" { changed?(vector, true) }
         }
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) { finish(touches) }
@@ -172,6 +196,24 @@ final class TouchPadView: UIView {
             guard let finger = fingers.removeValue(forKey: ObjectIdentifier(touch)) else { continue }
             GamepadInput.shared.touch(owner: finger.owner, control: control, value: nil)
         }
-        if fingers.isEmpty { changed?(.zero, false) }
+        if fingers.isEmpty {
+            vector = .zero; down = false; updateStickFace()
+            changed?(.zero, false)
+        }
+    }
+
+    private func updateStickFace() {
+        guard action == "LS" || action == "RS" else { return }
+        let diameter = bounds.width, size = diameter * 0.42
+        // Direct layer updates avoid implicit knob animations and keep the
+        // expensive glass background stationary during analog movement.
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        knob.bounds = CGRect(x: 0, y: 0, width: size, height: size)
+        knob.center = CGPoint(x: bounds.midX + vector.width * diameter * 0.29,
+                              y: bounds.midY + vector.height * diameter * 0.29)
+        knob.layer.cornerRadius = size / 2
+        knob.backgroundColor = .white.withAlphaComponent(down ? 0.55 : 0.25)
+        stickLabel.frame = bounds
+        CATransaction.commit()
     }
 }

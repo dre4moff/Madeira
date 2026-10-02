@@ -24,6 +24,7 @@
 
 #include "config.h"
 #include "../madeira_cfg.h"   /* ml1095: one config file */
+#include "runtime_profiling.h"
 #include <malloc/malloc.h>
 
 #include <assert.h>
@@ -38,6 +39,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include "ephemeral_swap.h"
 #include <sys/mman.h>
 #include <limits.h>
 #include <pthread.h>
@@ -730,7 +732,7 @@ static void *ios_pool_warmer_thread( void *arg )
              * ios_jit_mappings already records text_offset/text_size per module,
              * so walk exactly those ranges: any .text page whose max_prot has
              * lost EXECUTE is real corruption, with no benign explanation. */
-            if ((cycle % 5) == 0 && rx)
+            if (madeira_runtime_profiling_enabled() && (cycle % 5) == 0 && rx)
             {
                 unsigned mi;
                 size_t bad = 0, checked = 0;
@@ -770,7 +772,7 @@ static void *ios_pool_warmer_thread( void *arg )
                     dprintf(2, "[pool-rot] clean: %lu .text pages sampled across %u mappings (cycle=%u)\n",
                             (unsigned long)checked, ios_jit_mapping_count, cycle);
             }
-            if (cycle == 1 || (cycle % 15) == 0)
+            if (madeira_runtime_profiling_enabled() && (cycle == 1 || (cycle % 15) == 0))
             {
                 /* ml469 (wall #79): one-shot proof of whether TCP loopback
                  * works at all under this port — the webhelper's transport
@@ -830,7 +832,7 @@ static void *ios_pool_warmer_thread( void *arg )
                      *   vm_allocate(task, &addr, size, 0x33000003)
                      * = ANYWHERE | PURGABLE | VM_MAKE_TAG(51), and the tag picks
                      * the address range. Four variants isolate tag vs purgable. */
-                    {
+                    if (madeira_runtime_profiling_enabled()) {
                         static kern_return_t last[4] = { -1, -1, -1, -1 };
                         static const int fl[4] = { 0x33000003, 0x33000001, 0x00000003, 0x00000001 };
                         static const char *nm[4] = { "tag51+purg", "tag51", "purg", "plain" };
@@ -880,7 +882,7 @@ static void *ios_pool_warmer_thread( void *arg )
             {
                 extern boolean_t malloc_zone_check( malloc_zone_t *zone );
                 static int zone_bad, zone_announced;
-                if (!zone_bad)
+                if (madeira_runtime_profiling_enabled() && !zone_bad)
                 {
                     struct timeval t0, t1;
                     int ok;
@@ -915,7 +917,7 @@ static void *ios_pool_warmer_thread( void *arg )
              * addresses identify the owner offline (pool = RX base, FEX bands,
              * PA pools, guest heap). Every 5th cycle plus cycle 2, because the
              * walk is tens of thousands of kernel calls. */
-            if (cycle == 2 || (cycle % 5) == 0)
+            if (madeira_runtime_profiling_enabled() && (cycle == 2 || (cycle % 5) == 0))
             {
                 struct { unsigned long long base, size, dirty, res, swap; unsigned tag; } top[12];
                 unsigned long long dirty_by_tag[256];
@@ -14504,6 +14506,8 @@ static void ios_swap_init( void )
     ios_swap_fd = open( f, O_RDWR | O_CLOEXEC );
     if (ios_swap_fd < 0) { dprintf( 2, "[swap] ml1077 cannot open %s (errno %d): tier OFF\n", f, errno ); return; }
     if (ftruncate( ios_swap_fd, (off_t)ios_swap_cap )) { dprintf( 2, "[swap] ml1077 ftruncate failed (errno %d): tier OFF\n", errno ); close( ios_swap_fd ); ios_swap_fd = -1; return; }
+    if (madeira_detach_swap_file(ios_swap_fd, f))
+        dprintf( 2, "[swap] ephemeral backing: storage released automatically at process exit\n" );
     dprintf( 2, "[swap] ml1077 file-backed guest data tier ON: %s, cap %llu MB\n", f, (unsigned long long)(ios_swap_cap >> 20) );
     ios_swap_config();
     if (ios_swap_v2)

@@ -24,10 +24,17 @@ final class GamepadInput: @unchecked Sendable {
 
     @MainActor func configureTouch(controls: Set<UUID>) {
         let allowed = Self.touchEnabled ? controls : []
-        queue.async { [self] in touchState.configure(allowed); sample() }
+        queue.async { [self] in
+            if touchControlCount != allowed.count {
+                touchControlCount = allowed.count
+                fputs("[xinput-source] touch-controls=\(allowed.count) active=\(active ? 1 : 0)\n", stderr)
+            }
+            touchState.configure(allowed); sample()
+        }
     }
 
-    /// Publish player 1 before the game looks (MADEIRA_PAD_EARLY_SLOT=1; default OFF).
+    /// Publish player 1 before a library game looks. Developer sessions retain
+    /// the opt-in default; an explicit MADEIRA_PAD_EARLY_SLOT overrides both.
     ///
     /// Some input layers enumerate XInput once at startup and only rescan on a
     /// device-arrival broadcast, which this port does not deliver. Touch slot 0
@@ -38,14 +45,19 @@ final class GamepadInput: @unchecked Sendable {
     /// is connected at rest from the start; live input takes it over. The
     /// reservation lasts until the process exits (one Wine session per run),
     /// so player 1 then shows as connected for the whole session even while no
-    /// controller is in use. That is why it is opt-in: without the switch,
-    /// slot 0 connects only when a real source appears, as before.
-    @MainActor func reserveSessionSlot(touchControls: Bool) {
-        guard Self.enabled, Self.optIn("MADEIRA_PAD_EARLY_SLOT") else { return }
+    /// controller is in use. Only sessions with a controller source reserve it.
+    @MainActor func reserveSessionSlot(touchControls: Bool, libraryGame: Bool = false) {
+        guard Self.enabled else { return }
+        refreshControllers()
+        let choice = MadeiraConfig.get("env.MADEIRA_PAD_EARLY_SLOT")
+            ?? ProcessInfo.processInfo.environment["MADEIRA_PAD_EARLY_SLOT"]
+        guard choice.map({ $0 == "1" }) ?? libraryGame else { return }
         let touch = touchControls && Self.touchEnabled
         let paired = !GCController.controllers().isEmpty
         guard touch || paired else { return }
-        queue.async { [self] in touchState.reserved = true; sample() }
+        // Main actor only: drain the serial publisher before returning to the
+        // caller which starts Wine. An asynchronous reservation has no barrier.
+        queue.sync { touchState.reserved = true; sample() }
         LogStore.shared.log("[xinput] ml1990 slot=0 reserved for the session touch=\(touch ? 1 : 0) paired=\(paired ? 1 : 0)")
     }
 
@@ -74,6 +86,7 @@ final class GamepadInput: @unchecked Sendable {
     private var timer: DispatchSourceTimer?
     private var active = false
     private var touchState = TouchGamepadState()
+    private var touchControlCount = 0
     @MainActor private var observers: [NSObjectProtocol] = []
     @MainActor private var started = false
 
@@ -106,7 +119,9 @@ final class GamepadInput: @unchecked Sendable {
     @MainActor private func refreshControllers() {
         // Capture the live profile on main. Re-fetching extendedGamepad on the
         // polling queue yielded stale axes on devices tested in the fork.
-        let live = GCController.controllers().compactMap { controller -> (GCController, GCExtendedGamepad)? in
+        let detected = GCController.controllers()
+        fputs("[xinput-source] detected=\(detected.count) extended=\(detected.filter { $0.extendedGamepad != nil }.count)\n", stderr)
+        let live = detected.compactMap { controller -> (GCController, GCExtendedGamepad)? in
             guard let profile = controller.extendedGamepad else { return nil }
             controller.handlerQueue = queue
             return (controller, profile)

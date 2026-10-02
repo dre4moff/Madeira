@@ -127,6 +127,34 @@ compile_objcxx_arc() {
         echo "FAILED"; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
     fi
 }
+# Rebuild only the native Metal boundary, preserving converter/cache identity.
+if [ "${MADEIRA_ONLY:-}" = "winemetal_unix" ] || [ "${MADEIRA_ONLY:-}" = "cache" ]; then
+    test -f "$OUT_LIB" && test -f "$BUILD_DIR/libdxmt_combined.a"
+    compile_objc "$DXMT_SRC/winemetal/unix/${MADEIRA_ONLY}.c" "$MADEIRA_ONLY"
+    [ "$FAILED" -eq 0 ]
+    cp "$REPO_ROOT/app/Madeira/libdxmt_combined.a" "$BUILD_DIR/libdxmt_combined.a"
+    xcrun ar r "$OUT_LIB" "$OBJ_DIR/${MADEIRA_ONLY}.o"
+    xcrun ar r "$BUILD_DIR/libdxmt_combined.a" "$OBJ_DIR/${MADEIRA_ONLY}.o"
+    xcrun ranlib "$BUILD_DIR/libdxmt_combined.a"
+    cp "$BUILD_DIR/libdxmt_combined.a" "$REPO_ROOT/app/Madeira/libdxmt_combined.a"
+    exit 0
+fi
+
+# Cache-service-only changes must not replace unrelated renderer objects.
+if [ "${MADEIRA_ONLY:-}" = "madeira_ir_unix" ]; then
+    source "$BUILD_DIR/../madeira-d3d12/deps.sh"
+    test -f "$OUT_LIB" && test -f "$REPO_ROOT/app/Madeira/libdxmt_combined.a"
+    compile_objcxx_arc "$REPO_ROOT/madeira-d3d12/src/unix/madeira_ir_unix.mm" \
+                       madeira_ir_unix "-I$MSC_INCLUDE -I$REPO_ROOT/madeira-d3d12/src $INCLUDES $INCLUDES_DIRECTX"
+    [ "$FAILED" -eq 0 ]
+    cp "$REPO_ROOT/app/Madeira/libdxmt_combined.a" "$BUILD_DIR/libdxmt_combined.a"
+    xcrun ar r "$OUT_LIB" "$OBJ_DIR/madeira_ir_unix.o"
+    xcrun ar r "$BUILD_DIR/libdxmt_combined.a" "$OBJ_DIR/madeira_ir_unix.o"
+    xcrun ranlib "$BUILD_DIR/libdxmt_combined.a"
+    cp "$BUILD_DIR/libdxmt_combined.a" "$REPO_ROOT/app/Madeira/libdxmt_combined.a"
+    exit 0
+fi
+
 if [[ -f "$BUILD_DIR/../madeira-d3d12/deps.sh" ]] && \
    source "$BUILD_DIR/../madeira-d3d12/deps.sh"; then
     echo "=== madeira-d3d12 canary (Objective-C++, Metal Shader Converter) ==="

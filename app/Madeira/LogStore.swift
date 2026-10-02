@@ -1,6 +1,27 @@
 import Foundation
 import SwiftUI
 
+enum ArchivedLogMaintenance {
+    // Only the closed previous-session log; never truncates an active writer.
+    static func compact(_ url: URL, threshold: UInt64 = 64 << 20, tailBytes: Int = 8 << 20) {
+        guard url.lastPathComponent == "madeira-log.prev.txt",
+              let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
+              values.isRegularFile == true, values.isSymbolicLink != true,
+              UInt64(values.fileSize ?? 0) > threshold else { return }
+        do {
+            let file = try FileHandle(forReadingFrom: url)
+            defer { try? file.close() }
+            let size = try file.seekToEnd()
+            try file.seek(toOffset: 0)
+            var data = try file.read(upToCount: 64 << 10) ?? Data()
+            data.append(Data("\n[log-history] Older middle section omitted to bound archived diagnostics.\n".utf8))
+            try file.seek(toOffset: size - UInt64(min(tailBytes, Int(size))))
+            data.append(try file.read(upToCount: tailBytes) ?? Data())
+            try data.write(to: url, options: .atomic)
+        } catch { /* Keep the original log if compaction fails. */ }
+    }
+}
+
 final class LogStore: ObservableObject {
     static let shared = LogStore()
 
@@ -86,6 +107,7 @@ final class LogStore: ObservableObject {
             try? FileManager.default.removeItem(at: prevLogURL)
             try? FileManager.default.moveItem(at: logFileURL, to: prevLogURL)
         }
+        ArchivedLogMaintenance.compact(prevLogURL)
         try? "".write(to: logFileURL, atomically: true, encoding: .utf8)
 
         // Start batch flush timer on main thread. Interval depends on uiPaused.
@@ -147,7 +169,7 @@ final class LogStore: ObservableObject {
 
         let now = Date()
         stateLock.lock()
-        if let idx = sigToIndex[sig] {
+        if let idx = sigToIndex[sig], idx >= 0 {
             pendingUpdates.append((idx, 1, raw, now))
         } else {
             // Reserve an index slot — actual append happens on flush.
@@ -214,13 +236,17 @@ final class LogStore: ObservableObject {
 
         if newBatch.isEmpty && updateBatch.isEmpty { return }
 
+        // Assemble one snapshot: @Published must notify once per batch, not
+        // once for every field of every log row.
+        var nextEntries = entries
+
         // Apply updates (existing entries: bump count, update timestamp)
         for u in updateBatch {
             // Some indices may have been the -1 sentinel — match by signature
-            if u.index < 0 || u.index >= entries.count { continue }
-            entries[u.index].count += u.count
-            entries[u.index].lastTimestamp = u.lastTimestamp
-            entries[u.index].lastRaw = u.lastRaw
+            if u.index < 0 || u.index >= nextEntries.count { continue }
+            nextEntries[u.index].count += u.count
+            nextEntries[u.index].lastTimestamp = u.lastTimestamp
+            nextEntries[u.index].lastRaw = u.lastRaw
         }
 
         // Apply news: dedup against in-batch sigs (so if 5 same-sig lines
@@ -234,10 +260,10 @@ final class LogStore: ObservableObject {
                 collapsedNew[i].lastRaw = entry.lastRaw
             } else {
                 // Or against the live entries list (race with this same flush)
-                if let existing = entries.firstIndex(where: { $0.signature == entry.signature }) {
-                    entries[existing].count += 1
-                    entries[existing].lastTimestamp = entry.lastTimestamp
-                    entries[existing].lastRaw = entry.lastRaw
+                if let existing = nextEntries.firstIndex(where: { $0.signature == entry.signature }) {
+                    nextEntries[existing].count += 1
+                    nextEntries[existing].lastTimestamp = entry.lastTimestamp
+                    nextEntries[existing].lastRaw = entry.lastRaw
                     continue
                 }
                 batchSigToBatchIdx[entry.signature] = collapsedNew.count
@@ -251,28 +277,29 @@ final class LogStore: ObservableObject {
         // NSException on the wineserver thread (2026-07-03).
         stateLock.lock()
         for entry in collapsedNew {
-            entries.append(entry)
-            let newIndex = entries.count - 1
+            nextEntries.append(entry)
+            let newIndex = nextEntries.count - 1
             sigToIndex[entry.signature] = newIndex
         }
 
         // Reindex if we evicted
-        if entries.count > maxEntries {
+        if nextEntries.count > maxEntries {
             // Drop oldest by lastTimestamp
-            entries.sort { $0.lastTimestamp < $1.lastTimestamp }
-            let drop = entries.count - maxEntries
-            let removed = entries.prefix(drop).map { $0.signature }
-            entries.removeFirst(drop)
+            nextEntries.sort { $0.lastTimestamp < $1.lastTimestamp }
+            let drop = nextEntries.count - maxEntries
+            let removed = nextEntries.prefix(drop).map { $0.signature }
+            nextEntries.removeFirst(drop)
             for sig in removed { sigToIndex.removeValue(forKey: sig) }
             // Reindex remaining
             sigToIndex.removeAll()
-            for (i, e) in entries.enumerated() { sigToIndex[e.signature] = i }
+            for (i, e) in nextEntries.enumerated() { sigToIndex[e.signature] = i }
             // Sort back to insertion order (by firstTimestamp)
-            entries.sort { $0.firstTimestamp < $1.firstTimestamp }
+            nextEntries.sort { $0.firstTimestamp < $1.firstTimestamp }
             sigToIndex.removeAll()
-            for (i, e) in entries.enumerated() { sigToIndex[e.signature] = i }
+            for (i, e) in nextEntries.enumerated() { sigToIndex[e.signature] = i }
         }
         stateLock.unlock()
+        entries = nextEntries
     }
 
     /// Manual clear (used by UI button)

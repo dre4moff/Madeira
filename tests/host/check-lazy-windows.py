@@ -59,7 +59,7 @@ typedef uintptr_t ULONG_PTR; typedef unsigned int ULONG; typedef int NTSTATUS; t
 #define STATUS_NO_MEMORY ((NTSTATUS)0xc0000017)
 #define PtrToUlong(p) ((ULONG)(ULONG_PTR)(p))
 typedef int kern_return_t; typedef unsigned int mach_msg_type_number_t; typedef int task_t; typedef int *task_info_t;
-typedef uint64_t mach_vm_address_t, mach_vm_size_t; typedef int mach_port_t; typedef int *vm_region_info_t;
+typedef uint64_t mach_vm_address_t, mach_vm_size_t; typedef unsigned int mach_port_t; typedef int *vm_region_info_t;
 typedef struct { int protection; } vm_region_basic_info_data_64_t;
 #define KERN_SUCCESS 0
 #define TASK_VM_INFO 22

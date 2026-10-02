@@ -396,6 +396,13 @@ static int mad_sc_load(uint64_t key, struct madeira_ir_convert_args *a,
             read(fd, out2, want) != (ssize_t)want) { close(fd); return 0; }
     }
     if (read(fd, (void *)(uintptr_t)a->out_buf, (size_t)h.metallib_len) != (ssize_t)h.metallib_len) { close(fd); return 0; }
+    // Keep a reused DXBC entry warm for the same policy as DXIL. Update only
+    // once a day rather than writing metadata on every cache lookup.
+    {
+        struct stat st;
+        if (fstat(fd, &st) == 0 && time(NULL) - st.st_mtime > 24 * 3600)
+            futimes(fd, NULL);
+    }
     close(fd);
     a->ret_air_nranges2 = h.nranges2; a->ret_cb_table_bind2 = h.cb_bind2;   /* ml1083 */
     a->ret_arg_table_bind2 = h.arg_bind2; a->ret_arg_qwords2 = h.arg_qwords2;
@@ -1148,7 +1155,6 @@ static pthread_once_t g_dxc_once = PTHREAD_ONCE_INIT;
 static int g_dxc_disk_on, g_dxc_slot_on;
 static uint64_t g_dxc_cap, g_dxc_target, g_dxc_bytes;
 static uint32_t g_dxc_hits, g_dxc_misses, g_dxc_store_fail;
-static pthread_mutex_t g_dxc_prune_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int mad_env_is_zero(const char *name)
 {
@@ -1192,7 +1198,7 @@ static void mad_dxc_init_once(void)
     {
         unsigned nfiles = 0, removed = 0;
         g_dxc_bytes = mad_dxc_prune(dir, MAD_DXC_EXT, g_dxc_cap, g_dxc_target, &nfiles, &removed);
-        dprintf(2, "[d3d12-dxil-cache] ml1990 enabled: %u entries, %llu KB, bound %llu MB, %u evicted; retry slots %s\n",
+        dprintf(2, "[d3d12-dxil-cache] r19 enabled: %u entries, %llu KB, soft target %llu MB, %u obsolete entries evicted; retry slots %s\n",
                 nfiles, (unsigned long long)(g_dxc_bytes >> 10), cap_mb,
                 removed, g_dxc_slot_on ? "on" : "off");
     }
@@ -1209,23 +1215,16 @@ static void mad_dxc_count(int hit)
 
 static void mad_dxc_store(uint64_t key, const void *blob, size_t len)
 {
-    char path[1200], dir[1200];
-    uint64_t total;
+    char path[1200];
     if (!mad_sc_path_ext(key, MAD_DXC_EXT, path, sizeof path)) return;
     if (!mad_dxc_file_store(path, blob, len)) {
         if (__atomic_add_fetch(&g_dxc_store_fail, 1, __ATOMIC_RELAXED) <= 3)
             dprintf(2, "[d3d12-dxil-cache] ml1990 could not write an entry (errno %d)\n", errno);
         return;
     }
-    total = __atomic_add_fetch(&g_dxc_bytes, (uint64_t)len, __ATOMIC_RELAXED);
-    if (total > g_dxc_cap && mad_dxc_dir(dir, sizeof dir) && pthread_mutex_trylock(&g_dxc_prune_lock) == 0) {
-        unsigned nfiles = 0, removed = 0;
-        uint64_t left = mad_dxc_prune(dir, MAD_DXC_EXT, g_dxc_cap, g_dxc_target, &nfiles, &removed);
-        __atomic_store_n(&g_dxc_bytes, left, __ATOMIC_RELAXED);
-        pthread_mutex_unlock(&g_dxc_prune_lock);
-        dprintf(2, "[d3d12-dxil-cache] ml1990 bound reached: %u evicted, %u entries, %llu KB left\n",
-                removed, nfiles, (unsigned long long)(left >> 10));
-    }
+    __atomic_add_fetch(&g_dxc_bytes, (uint64_t)len, __ATOMIC_RELAXED);
+    // Never walk/sort/evict the disk cache on a shader compilation thread.
+    // Startup housekeeping enforces the soft target and protects warm entries.
 }
 
 /* Pipelines are created from several threads at once, so a single slot would

@@ -1,0 +1,56 @@
+--- a/FEXCore/Source/Interface/Core/Core.cpp
++++ b/FEXCore/Source/Interface/Core/Core.cpp
+@@ -1488,6 +1488,7 @@
+    * reached via its x64 fast-forward sequence -- preserves the x4/x5 varargs contract that
+    * the emulation round trip destroys; see Module.S). Same change-detection pattern as
+    * [cb-entry] below: CompileBlock runs often enough to notice promptly. */
++#ifdef FEX_IOS_HOST
+   {
+     static uint64_t FfsLastCount = 0;
+     static uint32_t FfsReports = 0;
+@@ -1514,6 +1515,8 @@
+                         IosCbEntryLog[4], IosCbEntryLog[5], IosCbEntryLog[7]);
+     }
+   }
++
++#endif
+ 
+   /* iOS-Madeira: refuse to compile obviously-invalid guest RIPs. After a
+    * NULL-vtable virtual call (`call [rax+8]` with rax=0), control flow
+@@ -1966,6 +1969,7 @@
+        * automatically healthy contention — it can equally be page reuse or a
+        * foreign writer, so check block_index/list_size against block_count before
+        * concluding anything. */
++#ifdef _WIN32
+       {
+         rpm_cas_snapshot Snap;
+         if (rpm_cas_snapshot_take(&Snap)) {
+@@ -1979,6 +1983,7 @@
+                             Snap.fail_changed, Snap.fail_unchanged, Snap.fail_invalid);
+         }
+       }
++#endif
+     }
+   }
+ 
+--- a/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
++++ b/FEXCore/Source/Utils/ArchHelpers/Arm64.cpp
+@@ -704,6 +704,7 @@
+    * which we DUAL-MAP (RW alias + RX alias). Aliased mappings are exactly where atomics
+    * can fault despite correct alignment. Report what the region actually is, so "guest
+    * data in a dual-mapped pool page" is distinguishable from ordinary private memory. */
++#ifdef _WIN32
+   MEMORY_BASIC_INFORMATION mbi {};
+   const char* type = "?";
+   if (VirtualQuery(reinterpret_cast<LPCVOID>(GPRs[AddressReg]), &mbi, sizeof(mbi))) {
+@@ -714,6 +715,10 @@
+                     Size, AddressReg, GPRs[AddressReg], GPRs[AddressReg] & 15,
+                     (GPRs[AddressReg] & 15) ? "yes" : "no", mbi.BaseAddress, mbi.RegionSize,
+                     mbi.Protect, type, mbi.State);
++#else
++  LogMan::Msg::EFmt("[caspal128] MISALIGNED-UNSUPPORTED Size={} addrReg=x{} addr={:#x} misalign={}",
++                    Size, AddressReg, GPRs[AddressReg], GPRs[AddressReg] & 15);
++#endif
+ }
+ 
+ static bool HandleCASPAL(uint32_t Instr, uint64_t* GPRs, uint32_t* StrictSplitLockMutex) {

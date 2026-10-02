@@ -5,8 +5,7 @@ import Darwin
 import ImageIO
 import Combine
 
-// ============================================================================
-// Library front end.
+// =====================================================================// Library front end.
 //
 // A game library in front of the existing launch path: entries are Windows
 // executables inside the prefix's drive_c, each with its own launch profile
@@ -18,8 +17,7 @@ import Combine
 // to it (FrontendChoice), and it has a "Use New Interface" button to return.
 // Every switch below is read with MadeiraConfig.flag, so `env.NAME = 0` in
 // madeira.cfg turns it off.
-// ============================================================================
-
+// =====================================================================
 /// Thermal state, Low Power Mode and screen capture every 10 s while a session
 /// runs: the three device conditions that explain a slow run in a log.
 /// MADEIRA_DEVICE_STATS=0 turns the line off.
@@ -149,6 +147,37 @@ enum FrontendChoice {
 /// One game in the library and its launch profile, stored in
 /// Documents/madeira-library.json (version 1). New fields must be optional so
 /// older files keep decoding; unknown keys are ignored.
+/// Render API arguments are per game; quoted values remain intact.
+enum LibraryLaunchArguments {
+    static func directX11(_ arguments: String, enabled: Bool) -> String {
+        guard enabled else { return arguments }
+        var tokens: [String] = [], token = ""
+        var quoted = false
+        for character in arguments {
+            if character == "\"" { quoted.toggle() }
+            if character.isWhitespace && !quoted {
+                if !token.isEmpty { tokens.append(token); token = "" }
+            } else { token.append(character) }
+        }
+        if !token.isEmpty { tokens.append(token) }
+        let renderFlags: Set<String> = ["-dx11", "-d3d11", "-dx12", "-d3d12", "-vulkan", "-opengl", "-opengl3", "-opengl4"]
+        tokens.removeAll { renderFlags.contains($0.lowercased()) }
+        tokens.append("-dx11")
+        return tokens.joined(separator: " ")
+    }
+}
+
+/// Legacy spatial profiles remain decodable. They no longer shrink the monitor:
+/// DLSS supplies reduced internal render targets while keeping the display size.
+enum LibraryMetalFX {
+    static func factor(_ mode: String?) -> Double {
+        switch mode { case "balanced": return 1.5; case "performance": return 2; default: return 1 }
+    }
+    static func renderResolution(_ output: String, mode: String?, supported: Bool) -> String {
+        return output
+    }
+}
+
 struct LibraryEntry: Codable, Identifiable {
     var id = UUID()
     var title: String
@@ -228,13 +257,23 @@ struct LibraryEntry: Codable, Identifiable {
     /// library files decode; the fork's files carry the same keys.
     var fastSync: Bool?
     var semaphoreFastPath: Bool?
+    /// Prefer native Microsoft VC++ 140 DLLs for this game only. Optional so
+    /// libraries saved by v0.1.0 still decode; nil/false keeps Wine's defaults.
+    var nativeVCRuntime: Bool?
+    /// Pass -dx11 to this game, including Steam/Dock. Missing means off.
+    var forceDirectX11: Bool?
+    /// Retired spatial setting: decoded for compatibility, never lowers the monitor.
+    var metalFX: String?
+    /// Route a game's D3D11 DLSS Super Resolution calls to MetalFX Temporal.
+    /// Separate opt-in: an old spatial choice must not silently spoof NVIDIA.
+    var metalFXDLSS: Bool?
 
     var displayMode: DisplayMode { display.flatMap(DisplayMode.init(rawValue:)) ?? .fit }
 
     var launchArguments: String {
         if desktop == true { return "/desktop=shell,\(resolution) C:\\windows\\system32\\services.exe" }
-        if startsSteamGameDirectly { return steamProgramArguments ?? "" }
-        return arguments
+        let base = startsSteamGameDirectly ? (steamProgramArguments ?? "") : arguments
+        return LibraryLaunchArguments.directX11(base, enabled: forceDirectX11 == true)
     }
 
     /// A Steam game that starts as its own program ("Start with: The game").
@@ -287,6 +326,17 @@ struct LibraryEntry: Codable, Identifiable {
     /// Runs on the launch worker, before the JIT pool is taken.
     func applyEnvironment() {
         configureLaunch()
+        let renderSize = LibraryMetalFX.renderResolution(resolution, mode: desktop == true ? nil : metalFX,
+                                                        supported: madeira_supports_spatial_upscaling() != 0)
+        let factor = renderSize == resolution ? 1 : LibraryMetalFX.factor(metalFX)
+        setenv("MADEIRA_GAME_METALFX_FACTOR", factor > 1 ? String(factor) : "0", 1)
+        setenv("MADEIRA_GAME_METALFX_OUTPUT", factor > 1 ? resolution : "", 1)
+        let dlss = metalFXDLSS == true && desktop != true && bits != 32 && madeira_supports_temporal_upscaling() != 0
+        setenv("MADEIRA_GAME_METALFX_DLSS", dlss ? "1" : "0", 1)
+        // The bridge applies this after madeira.cfg, before Wine builds the
+        // guest environment. Always set it, so another game's choice cannot leak.
+        setenv("MADEIRA_GAME_NATIVE_VCRUNTIME", nativeVCRuntime == true ? "1" : "0", 1)
+        setenv("MADEIRA_GAME_DIRECTX11", forceDirectX11 == true && desktop != true ? "1" : "0", 1)
         // Unset unless chosen: FEX's own default then applies, as for any other launch.
         if reducedX87 { setenv("FEX_X87REDUCEDPRECISION", "1", 1) } else { unsetenv("FEX_X87REDUCEDPRECISION") }
         // Exported only when chosen: unset keeps the engine's own default (and any
@@ -302,10 +352,15 @@ struct LibraryEntry: Codable, Identifiable {
         }
         madeira_set_vsync_locked(effectiveFPSMode)
         fputs("[frontend] launch profile applied\n", stderr)
-        LogStore.shared.log("[display-shape] resolution=\(resolution) mode=\(displayMode.rawValue)")
+        LogStore.shared.log("[display-shape] resolution=\(renderSize) output=\(resolution) metalfx=\(factor) dlss-metalfx=\(dlss ? 1 : 0) mode=\(displayMode.rawValue)")
     }
 
     /// What the bridge starts. Set on the main thread before the session begins.
+    var sessionRenderResolution: String {
+        LibraryMetalFX.renderResolution(resolution, mode: desktop == true ? nil : metalFX,
+                                         supported: madeira_supports_spatial_upscaling() != 0)
+    }
+
     func configureLaunch() {
         // "The game"'s identity and working folder for this launch only (the bridge
         // reads and clears them); every other launch starts without them.
@@ -315,7 +370,7 @@ struct LibraryEntry: Codable, Identifiable {
             // the virtual monitor follows this entry's Resolution, as below. "The game" starts
             // its own program below, like any library game.
             if !startsSteamGameDirectly {
-                GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: resolution)
+                GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: sessionRenderResolution)
                 return
             }
         }
@@ -332,7 +387,7 @@ struct LibraryEntry: Codable, Identifiable {
         // Every session's virtual monitor takes this entry's Resolution
         // (MADEIRA_SCREEN_W/H, source "knob"); for the Desktop entry it is the
         // same size as its /desktop= argument.
-        GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: resolution)
+        GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: sessionRenderResolution)
     }
 }
 
@@ -359,6 +414,7 @@ final class LibraryModel: ObservableObject {
     @Published var launching = false
     @Published var overlayFields = ["FPS", "Frame time", "RAM", "Battery"]
     private var launchPresent: UInt64 = 0
+    private var presentRate = SessionPresentRate()
     private var launchSurface: UInt64 = 0
     private var launchStarted = Date()
     /// Read by the starting screen for its elapsed-time line.
@@ -666,6 +722,7 @@ final class LibraryModel: ObservableObject {
         LibraryController.shared.configure(enabled: enabled, ownsInput: false)
         Self.sessionsThisRun += 1
         launchPresent = madeira_get_present_count(); launchStarted = Date(); launchSlow = false; launchLogs = entry.liveLogs
+        presentRate.reset(count: launchPresent, time: ProcessInfo.processInfo.systemUptime)
         launchSurface = winios_surface_present_count()
         MetalBackedView.presentCountAtLaunch = launchPresent; laidOutAfterFirstPresent = false
         launching = true; overlayFields = entry.overlayFields ?? ["FPS", "Frame time", "RAM", "Battery"]
@@ -714,6 +771,10 @@ final class LibraryModel: ObservableObject {
         }
         if wine_process_is_running() != 0 {
             sawProcess = true
+            if let rate = presentRate.sample(count: madeira_get_present_count(), time: ProcessInfo.processInfo.systemUptime) {
+                fputs(String(format: "[present-rate] presents/s=%.1f interval-ms=%.1f window-s=%.1f starting=%d menu=%d\n",
+                    rate.fps, rate.intervalMS, rate.seconds, launching ? 1 : 0, menu ? 1 : 0), stderr)
+            }
             if sessionMessage == "Starting…" { sessionMessage = "" }
         } else if sawProcess && wineserver_is_running() == 0 { finish() }
         // The first frame gives Aspect and Fill height the drawable's shape.
@@ -812,6 +873,27 @@ final class LibraryModel: ObservableObject {
 enum LibraryError: LocalizedError {
     case message(String)
     var errorDescription: String? { if case let .message(text) = self { return text }; return nil }
+}
+
+/// Ten-second present counter averages, sampled by the existing session timer.
+/// These measure submission cadence, not GPU duration or physical scanout.
+struct SessionPresentRate {
+    private var count: UInt64 = 0
+    private var time: TimeInterval = 0
+    mutating func reset(count: UInt64, time: TimeInterval) {
+        self.count = count; self.time = time
+    }
+    mutating func sample(count: UInt64, time: TimeInterval) -> (fps: Double, intervalMS: Double, seconds: Double)? {
+        guard time.isFinite else { return nil }
+        guard count >= self.count, time >= self.time else {
+            reset(count: count, time: time); return nil
+        }
+        let seconds = time - self.time
+        guard seconds >= 10 else { return nil }
+        let frames = count - self.count
+        reset(count: count, time: time)
+        return (Double(frames) / seconds, frames == 0 ? 0 : seconds * 1000 / Double(frames), seconds)
+    }
 }
 
 // Serialized off the main actor. Cancellation follows the card's SwiftUI task,
@@ -1937,6 +2019,7 @@ struct LibraryView: View {
             if SteamSettingsSection.shown, settingsShow("Steam", "Dock", "sign in", "account", "setup") {
                 SteamSettingsSection(open: { settingsSheet = $0 })
             }
+            if settingsShow("storage", "cache", "temporary", "clean") { CacheStorageSettings() }
             if settingsShow("appearance", "liquid metal", "metal", "glass") {
                 Section {
                     Toggle("Liquid metal", isOn: $liquidMetal.on)
@@ -2301,6 +2384,26 @@ struct LibraryDetail: View {
                     FPSChoice(mode: $entry.fpsMode)
                 }
                 Section {
+                    Toggle("Native VC++ Runtime", isOn: Binding(
+                        get: { entry.nativeVCRuntime ?? false },
+                        set: { entry.nativeVCRuntime = $0 }
+                    ))
+                    Text("Prefer native Microsoft VC++ libraries for this game: msvcp140, msvcp140_1, msvcp140_2, vcruntime140 and vcruntime140_1. Applies at the next launch; turn off to restore Wine's default behavior.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle("Force DirectX 11", isOn: Binding(
+                        get: { entry.forceDirectX11 ?? false },
+                        set: { entry.forceDirectX11 = $0 }
+                    ))
+                    Text("Request DirectX 11 with -dx11 at the next launch, including Steam games. The game must support DirectX 11; turn off to use its default renderer.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if entry.desktop != true {
+                        Toggle("DLSS via MetalFX (experimental)", isOn: Binding(
+                            get: { entry.metalFXDLSS ?? false }, set: { entry.metalFXDLSS = $0 }
+                        ))
+                        .disabled(entry.bits == 32 || madeira_supports_temporal_upscaling() == 0)
+                        Text("At the next launch, enable DLSS Super Resolution in the game's graphics settings and choose its quality there. Uses MetalFX Temporal with 64-bit DirectX 11 or Madeira DirectX 12 games on supported devices. Keeps the selected display resolution. Availability depends on the game's DLSS integration; Frame generation is not supported by this option.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Toggle("Reduced-precision x87", isOn: $entry.reducedX87)
                     // Exported for this game only when chosen (applyEnvironment).
                     Picker("CPU cores reported", selection: Binding(get: { entry.cpuCount ?? 0 }, set: { entry.cpuCount = $0 == 0 ? nil : $0 })) {
@@ -2922,6 +3025,18 @@ struct LibraryHUD: View {
                 LibraryPointerSettings()
                 Divider()
                 Toggle("Performance overlay", isOn: $model.performance)
+                if Bundle.main.object(forInfoDictionaryKey: "MadeiraProfileBuild") as? Bool == true {
+                    Divider()
+                    Text("Profiling phase").font(.headline)
+                    Text("Select a phase, then test for 30 seconds. The marker appears in the log and Instruments.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(Array(["Stationary", "Camera turn only", "Move through map", "Repeat the same route"].enumerated()), id: \.offset) { phase in
+                        Button(phase.element) {
+                            madeira_perf_mark_phase(UInt32(phase.offset + 1))
+                            model.menu = false
+                        }
+                    }
+                }
                 if model.performance {
                     ForEach(["FPS", "Frame time", "RAM", "Battery"], id: \.self) { field in
                         Toggle(field, isOn: Binding(get: { model.overlayFields.contains(field) }, set: { on in

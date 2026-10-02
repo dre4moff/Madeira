@@ -35,6 +35,7 @@
 /* The window census struct is shared with Swift through this header;
  * including it here keeps both sides' definitions the same. */
 #include "Winios.h"
+#include "../../../build/ntdll-unix/runtime_profiling.h"
 
 /* csops syscall — CS_DEBUGGED is the flag StikDebug JIT rides on. Declared by
  * hand for the same reason JITAllocator.c does: <sys/codesign.h> is not in the
@@ -1010,11 +1011,11 @@ static void winios_ensure_compositor(void) {
                          queue:[NSOperationQueue mainQueue]
                     usingBlock:^(NSNotification *note) { winios_layout_compositor(); }];
     }
-    /* Wedged-thread triage: sample every thread's stack every 20s from
+    /* Opt-in wedged-thread triage: sample every thread's stack every 20s from
      * an app-side timer — keeps firing even when all wine threads are
      * stuck (unlike the tree dump, which rides wine's event drain). */
     static dispatch_source_t stack_timer;
-    if (!stack_timer) {
+    if (madeira_runtime_profiling_enabled() && !stack_timer) {
         stack_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
                           dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
         dispatch_source_set_timer(stack_timer, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC),

@@ -12,7 +12,7 @@
  *   - the entry round-trips through memory and disk and is handed over with
  *     the caller's caps and the size-then-fill contract respected;
  *   - torn, truncated and foreign entries are refused;
- *   - the size bound evicts least-recently-used entries and nothing else.
+ *   - the soft size bound evicts obsolete entries and protects warm shaders.
  *
  * Build and run (Linux / WSL / macOS):
  *   cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -I madeira-d3d12/src \
@@ -388,6 +388,20 @@ static void test_prune(void)
         utimes(path, NULL);
         left = mad_dxc_prune(dir, MAD_DXC_EXT, 2500, 2000, &nf, &rm);
         CHECK(rm == 1 && !exists(dir, "000000000000000d.mdxc") && exists(dir, "000000000000000c.mdxc"), "LRU honours a recent use");
+    }
+    {
+        /* A warm working set may exceed the soft target. Shader recompilation
+         * must not become the price of staying under an arbitrary disk limit. */
+        char path[512], link[512];
+        snprintf(path, sizeof path, "%s/000000000000000e.mdxc", dir);
+        utimes(path, NULL);
+        snprintf(link, sizeof link, "%s/0000000000000001.mdxc", dir);
+        CHECK(symlink(path, link) == 0, "create symlink fixture");
+        left = mad_dxc_prune(dir, MAD_DXC_EXT, 1, 1, &nf, &rm);
+        CHECK(left == 2000 && nf == 2 && rm == 0, "warm shaders stay above soft budget; symlink excluded");
+        struct stat st;
+        CHECK(lstat(link, &st) == 0 && S_ISLNK(st.st_mode), "symlink untouched");
+        unlink(link);
     }
     {
         const char *names[] = { "000000000000000c.mdxc", "000000000000000e.mdxc", "00000000000000aa.mdsc", "notakey.mdxc", "000000000000000f.mdxc.tmp123" };

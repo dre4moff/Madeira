@@ -833,7 +833,8 @@ func packageBuffer(apps: [UInt32], depots: [UInt32]) -> Data {
         var wrong = key; wrong[0] ^= 1
         do { let o = try ContentDecryptor.processChunk(encryptedData: encrypted, depotKey: wrong, expectedCRC: ContentDecryptor.adler32(plainVector), expectedSize: plainVector.count); require(o != plainVector, "\(kind): a wrong key does not decode") }
         catch { require(error is SteamError, "\(kind): a wrong key is rejected") }
-        var cut = encrypted; cut.removeLast(40)
+        // Remove encrypted payload, not just the optional PKZip directory.
+        let cut = Data(encrypted.prefix(32))
         do { let o = try ContentDecryptor.processChunk(encryptedData: cut, depotKey: key, expectedCRC: 0, expectedSize: plainVector.count); require(o != plainVector, "\(kind): a truncated chunk does not decode") }
         catch { require(error is SteamError, "\(kind): a truncated chunk is rejected") }
     }
@@ -1015,15 +1016,17 @@ work = Path(tempfile.mkdtemp(prefix='madeira-steam-library-'))
 servers = []
 try:
     shim = work / 'shim'
-    for name, header, csource in [('CommonCrypto', CRYPTO_H, CRYPTO_C), ('Compression', COMPRESSION_H, COMPRESSION_C)]:
+    for name, header, csource in ([] if sys.platform == 'darwin' else [('CommonCrypto', CRYPTO_H, CRYPTO_C), ('Compression', COMPRESSION_H, COMPRESSION_C)]):
         directory = shim / name
         directory.mkdir(parents=True)
         stem = 'cc_shim' if name == 'CommonCrypto' else 'compression_shim'
         (directory / f'{stem}.h').write_text(header)
         (directory / f'{stem}.c').write_text(csource)
         (directory / 'module.modulemap').write_text(f'module {name} [system] {{ header "{stem}.h" export * }}\n')
-    (shim / 'zlib').mkdir()
-    (shim / 'zlib/module.modulemap').write_text('module zlib [system] { header "/usr/include/zlib.h" link "z" export * }\n')
+    shim.mkdir(parents=True, exist_ok=True)
+    if sys.platform != 'darwin':
+        (shim / 'zlib').mkdir()
+        (shim / 'zlib/module.modulemap').write_text('module zlib [system] { header "/usr/include/zlib.h" link "z" export * }\n')
     (work / 'decoders.h').write_text(DECODERS_H.format(app=app))
 
     objects = []
@@ -1033,14 +1036,15 @@ try:
         require(result.returncode == 0, f'{Path(source).name} compiles on the host')
         if result.returncode: sys.stdout.write(result.stderr[-3000:])
         objects.append(str(obj))
-    compile_c(shim / 'CommonCrypto/cc_shim.c', ['-I', str(shim / 'CommonCrypto')])
-    compile_c(shim / 'Compression/compression_shim.c', ['-I', str(shim / 'Compression')])
+    if sys.platform != 'darwin':
+        compile_c(shim / 'CommonCrypto/cc_shim.c', ['-I', str(shim / 'CommonCrypto')])
+        compile_c(shim / 'Compression/compression_shim.c', ['-I', str(shim / 'Compression')])
     for name in ['zstd_edu.c', 'lzma_shim.c', 'chunk_zip.c']:
         compile_c(steam / name)
 
     (work / 'stubs.swift').write_text(STUBS.replace('RELATIVE_ROOT', relative_root).replace('REASON', reason))
     (work / 'checks.swift').write_text(CHECKS)
-    (work / 'dock.swift').write_text('import Foundation\nimport Glibc\n' + dock_head + dock_body)
+    (work / 'dock.swift').write_text('import Foundation\n#if canImport(Darwin)\nimport Darwin\n#else\nimport Glibc\n#endif\n' + dock_head + dock_body)
     (work / 'owned.swift').write_text('import Foundation\n' + owned_game + playtime_source)
     (work / 'downloader.swift').write_text(downloader_host)
     production = [steam / 'Proto/SteamProtoMessages.swift', steam / 'Core/SteamError.swift', steam / 'Core/SteamProtocol.swift',
@@ -1054,7 +1058,7 @@ try:
                             '-import-objc-header', str(work / 'decoders.h'),
                             str(work / 'stubs.swift'), str(work / 'checks.swift'), str(work / 'dock.swift'), str(work / 'owned.swift'),
                             str(work / 'downloader.swift')] + [str(x) for x in production] + objects +
-                           ['-Xlinker', '-lcrypto', '-Xlinker', '-llzma', '-Xlinker', '-lz'], capture_output=True, text=True)
+                           ([] if sys.platform == 'darwin' else ['-Xlinker', '-lcrypto']) + ['-Xlinker', '-llzma', '-Xlinker', '-lz'], capture_output=True, text=True)
     require(build.returncode == 0, 'the production Steam library, download and decoder code compile on the host')
     if build.returncode:
         sys.stdout.write(build.stderr[-6000:])

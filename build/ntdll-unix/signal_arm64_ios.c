@@ -952,6 +952,7 @@ int ios_beacon_teb_count;
 #define IOS_PUMP_MAX 4
 extern void ios_alert_ring_dump(void);   /* ml439 (#74): unix/sync.c alert-flow probe */
 extern void ios_alert_waiter_dump(void); /* ml440 (#74): >60s parkers + their lock words */
+#include "runtime_profiling.h"
 void ios_pump_sample(void)
 {
     static int samples;
@@ -962,8 +963,11 @@ void ios_pump_sample(void)
     int count = __sync_fetch_and_add(&ios_thread_count, 0);
     if (count > IOS_MAX_WINE_THREADS) count = IOS_MAX_WINE_THREADS;
 
-    ios_alert_ring_dump();   /* ml439: static ring during a parked-stall = wakes dying PE-side */
-    ios_alert_waiter_dump(); /* ml440: name the lock the parked crowd is starving on */
+    const int profiling = madeira_runtime_profiling_enabled();
+    if (profiling) {
+        ios_alert_ring_dump();   /* ml439: static ring during a parked-stall = wakes dying PE-side */
+        ios_alert_waiter_dump(); /* ml440: name the lock the parked crowd is starving on */
+    }
     /* ml447: orphan-lock detector — collect live threads' TEB Instr[6]
      * CodeBufferWriteMutex stamps; a held-exclusive SRW with >=3 waiters that
      * NO live thread stamps (3 cycles running) has a vanished dead owner. */
@@ -992,7 +996,7 @@ void ios_pump_sample(void)
                 uint32_t stid = 0;
                 mach_vm_read_overwrite( mach_task_self(), (mach_vm_address_t)(steb + 0x48), 4,
                                         (mach_vm_address_t)&stid, &sgot );
-                dprintf(2, "[stamp-set] LIVE S-holder tid=%04x teb=0x%llx mutex=0x%llx rev=ml448\n",
+                if (profiling) dprintf(2, "[stamp-set] LIVE S-holder tid=%04x teb=0x%llx mutex=0x%llx rev=ml448\n",
                         stid, (unsigned long long)steb, (unsigned long long)stamp);
                 stamps[ns++] = stamp;
             }
@@ -1011,6 +1015,8 @@ void ios_pump_sample(void)
         }
         ios_orphan_check( stamps, ns );
     }
+    // Orphan-lock recovery above remains active; subsequent stack walks are diagnostics.
+    if (!profiling) return;
     ios_lock_census();
     if (samples >= 120) return;
     /* discover beacon TEBs (ml399: server thread and pump can differ) */

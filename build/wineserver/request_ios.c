@@ -50,6 +50,7 @@
 
 #include <os/log.h>
 #include "wine_log_ios.h"
+#include "../ntdll-unix/runtime_profiling.h"
 #include <pthread.h>
 
 #include "ntstatus.h"
@@ -513,12 +514,13 @@ int send_client_fd( struct process *process, int fd, obj_handle_t handle )
     struct msghdr msghdr;
     char cmsg_buffer[256];
     struct cmsghdr *cmsg;
-    int ret;
+    int ret, send_error;
 
     /* task #24: include requester identity — the settings-freeze loop
      * resends the same handle forever; tid names the retrying thread and
      * process id disambiguates which pseudo-process's msg socket this is. */
-    ws_log("[wineserver] send_client_fd: fd=%d handle=0x%x msg_fd_unix=%d proc=%04x tid=%04x",
+    if (madeira_runtime_profiling_cached())
+        ws_log("[wineserver] send_client_fd: fd=%d handle=0x%x msg_fd_unix=%d proc=%04x tid=%04x",
            fd, handle, get_unix_fd( process->msg_fd ), process->id,
            current ? current->id : 0);
 
@@ -544,9 +546,11 @@ int send_client_fd( struct process *process, int fd, obj_handle_t handle )
         fprintf( stderr, "%04x: *fd* %04x -> %d\n", current ? current->id : process->id, handle, fd );
 
     ret = sendmsg( get_unix_fd( process->msg_fd ), &msghdr, 0 );
+    send_error = errno;
 
-    ws_log("[wineserver] send_client_fd: sendmsg returned %d (expected %lu) errno=%d",
-           ret, (unsigned long)sizeof(handle), errno);
+    if (ret != sizeof(handle) || madeira_runtime_profiling_cached())
+        ws_log("[wineserver] send_client_fd: sendmsg returned %d (expected %lu) errno=%d",
+           ret, (unsigned long)sizeof(handle), send_error);
 
     if (ret == sizeof(handle)) return 0;
 
@@ -556,14 +560,15 @@ int send_client_fd( struct process *process, int fd, obj_handle_t handle )
         ws_log("[wineserver] send_client_fd: partial sendmsg %d", ret);
         kill_process( process, 1 );
     }
-    else if (errno == EPIPE)
+    else if (send_error == EPIPE)
     {
         ws_log("[wineserver] send_client_fd: EPIPE");
         kill_process( process, 0 );
     }
     else
     {
-        ws_log("[wineserver] send_client_fd: error %s", strerror(errno));
+        ws_log("[wineserver] send_client_fd: error %s", strerror(send_error));
+        errno = send_error;
         fprintf( stderr, "Protocol error: process %04x: ", process->id );
         perror( "sendmsg" );
         kill_process( process, 1 );

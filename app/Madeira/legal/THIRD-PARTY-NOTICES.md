@@ -15,6 +15,7 @@ dependency license texts are in `LICENSES/`. See "Why GPL-3.0-or-later" below.
 | **Wine** | LGPL-2.1-or-later | **GPL-3.0-or-later** | Fork relicensed under LGPL-2.1 §3, which expressly permits applying the ordinary GPL to a copy. `ntdll`, `wineserver`, `win32u`, ARM64EC loader modified for iOS. |
 | **FEX-Emu** | MIT | upstream MIT + **modifications GPL-3.0-or-later** | Forked. x86-64 → ARM64 translation. |
 | **DXMT** | MIT | upstream MIT + **modifications GPL-3.0-or-later** | Forked. D3D11 → Metal. |
+| **NVIDIA NVAPI interface headers** | MIT | Used by DXMT's own `nvapi64.dll` implementation | Copyright 2019–2024 NVIDIA Corporation & Affiliates. The app ships the DXMT implementation and its `nvngx.dll` MetalFX bridge, not NVIDIA's DLSS model or driver. License text: `NVIDIA-NVAPI-MIT.txt`. |
 | **DXMT — Direct3D 9 / DXSO frontend** | **LGPL-2.1-or-later** | **LGPL-2.1-or-later**, kept as received | Written by **David Acevedo** (his commit `fe69cd3`, "feat(d3d9): add a Direct3D 9 frontend") and imported into `dxmt` from his fork of the same upstream: `https://github.com/dacevedo12/dxmt.git`, tag `v0.4-d3d9`, commit `e8dd4c656dcb74a6d970a30a397d1558b0e3fb2b`. That tree's licence is the DXMT project notice ("Copyright (c) 2023-2026 Feifan He for CodeWeavers", LGPL-2.1-or-later), which postdates upstream's MIT→LGPL relicense, so the import is **not** MIT. It is kept under LGPL-2.1-or-later as received: the LGPL-2.1 §3 option to distribute a copy under the ordinary GPL is not exercised, and that choice is left to the maintainer. 125hz's additions to the D3D9 path are licensed like the DXMT row. Licence text in `dxmt/COPYING.LIB` and `LICENSES/LGPL-2.1.txt`; the file-by-file list is in `dxmt/LICENSE-MADEIRA.md`. |
 | **rpmalloc** | 0BSD | 0BSD + **Will Faust's modifications GPL-3.0-or-later** | Nested submodule of FEX, forked to `willfaust/rpmalloc`. Commits by Ryan Houdek are **not** relicensed. |
 | **GMP** 6.3.0 | **LGPL-3.0-or-later** or GPL-2.0-or-later | Static (`libgmp.a`). |
@@ -107,7 +108,7 @@ files that do not carry another license notice are licensed under
 GPL-3.0-or-later.** Files carrying their own copyright or license header are
 governed by that header.
 
-## Microsoft Visual C++ runtime redistributables — NOT DISTRIBUTED
+## Microsoft Visual C++ runtime redistributables — locally supplied binaries
 
 Games built with MSVC require Microsoft's Visual C++ runtime DLLs. Those are
 Microsoft-authored binaries, redistributable only under the Visual Studio
@@ -115,6 +116,14 @@ redistributable terms and only in unmodified form. They are **not** covered by
 this project's license and are **no longer tracked in this repository**;
 `app/Madeira/x86_64-vcruntime/*.dll` is gitignored and must be supplied locally.
 See `tools/fetch-vcruntime.md`.
+
+Public fork releases do not redistribute the Microsoft runtime DLLs. A user
+may prepare a personal IPA with locally supplied, unmodified x64 files and
+the accompanying Microsoft terms using `tools/prepare-vcruntime-ipa.py`.
+Those files remain outside the GPL license and are used only when the per-game
+Native VC++ Runtime option is enabled. Earlier private test IPAs included the
+unmodified Visual C++ 2022 14.44.35211 runtime with intact certificate payloads;
+those private IPAs are not the public release assets.
 
 ### Earlier malformed copies were purged from history
 

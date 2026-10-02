@@ -30,9 +30,16 @@ assert 'url?.host == "client-update.akamai.steamstatic.com"' in text and 'url?.s
 print('PASS: three pinned packages from one HTTPS Valve host; redirects stay on it')
 with tempfile.TemporaryDirectory(prefix='madeira-runtime-') as tmp:
     tmp = Path(tmp)
-    (tmp/'module.modulemap').write_text('module zlib [system] { header "/usr/include/zlib.h" export * link "z" }')
+    if os.uname().sysname != 'Darwin':
+        (tmp/'module.modulemap').write_text('module zlib [system] { header "/usr/include/zlib.h" export * link "z" }')
     main = r'''
 import Foundation
+#if !os(Linux)
+// Unavailable app/Wine bridge: these archive/registry fixtures must never call it.
+func wine_process_is_running() -> Int32 { fatalError("Unexpected Wine bridge call") }
+func wineserver_is_running() -> Int32 { fatalError("Unexpected Wine bridge call") }
+func madeira_seed_prefix_if_needed(_ path: String) { fatalError("Unexpected prefix seed") }
+#endif
 let fm = FileManager.default
 let mode = CommandLine.arguments[1]
 if mode == "registry" {

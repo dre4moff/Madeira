@@ -63,6 +63,29 @@ enum MadeiraConfig {
         return ["1", "on", "true", "yes"].contains(v)
     }
 
+    /// Native server hooks cache their diagnostic policy on first use, before
+    /// the Wine bridge exports the full launch configuration. Establish these
+    /// two keys before allocating the JIT pool or starting wineserver.
+    static func applyEarlyRuntimeProfilingPolicy() {
+        setenv("MADEIRA_QUIET", "1", 1)
+        let names = ["MADEIRA_QUIET", "MADEIRA_RUNTIME_PROFILING", "MADEIRA_BOTTLENECK_STATS"]
+        if present {
+            let values = all()
+            for name in names {
+                if let value = values["env." + name] { setenv(name, value, 1) }
+            }
+        } else if let d = documents,
+                  let text = try? String(contentsOf: d.appendingPathComponent("madeira-env.txt"), encoding: .utf8) {
+            // Match the bridge's legacy KEY=VALUE parser, including last wins.
+            for raw in text.components(separatedBy: .newlines) {
+                let line = raw.trimmingCharacters(in: .whitespaces)
+                guard !line.hasPrefix("#"), let eq = line.firstIndex(of: "="), eq != line.startIndex else { continue }
+                let name = String(line[..<eq])
+                if names.contains(name) { setenv(name, String(line[line.index(after: eq)...]), 1) }
+            }
+        }
+    }
+
     /// Set or remove one key in madeira.cfg (Settings). Comments and every
     /// other line are kept; earlier lines for the key are dropped and the new
     /// value is appended; a nil value removes the key. Without madeira.cfg the

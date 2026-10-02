@@ -25,6 +25,7 @@
 #include "config.h"
 
 #ifdef WINE_IOS
+#include "runtime_profiling.h"
 #include <os/log.h>
 #include <pthread.h>
 #include <dlfcn.h>
@@ -2443,6 +2444,7 @@ static struct ios_wait_entry *ios_wait_slot(void)
 static void ios_wait_enter( const union select_op *op, data_size_t size,
                             UINT flags, timeout_t abs_timeout, void *ret_pc )
 {
+    if (!madeira_runtime_profiling_cached()) return;
     struct ios_wait_entry *e = ios_wait_slot();
     struct timespec ts;
     int i, n = 0;
@@ -2470,6 +2472,7 @@ static void ios_wait_enter( const union select_op *op, data_size_t size,
 
 static void ios_wait_leave(void)
 {
+    if (!madeira_runtime_profiling_cached()) return;
     struct ios_wait_entry *e = ios_wait_slot();
     __sync_synchronize();
     e->seq++;                       /* -> even: no longer waiting */
@@ -4175,16 +4178,17 @@ void server_init_process_done(void)
          * (unix side), or elsewhere — mapping the hot buckets tells us
          * where the ~1.4s/frame actually goes. Counts halve at each print
          * so the histogram tracks the current phase. */
-        /* ml875 [thread-sample]: ONE task-wide sampler (ml873 armed seven, one
-         * per pseudo-process, each suspending the others' threads). Body in
-         * ios_thread_sampler_main() above. */
-        if (__sync_bool_compare_and_swap(&ios_ts_armed, 0, 1))
+        /* One task-wide set of diagnostic workers. All four profiling paths
+         * respect quiet mode; MADEIRA_RUNTIME_PROFILING=1 opts back in. These
+         * workers only measure execution, unlike the JIT/memory safeguards. */
+        if (madeira_runtime_profiling_enabled() &&
+            __sync_bool_compare_and_swap(&ios_ts_armed, 0, 1))
         {
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ ios_thread_sampler_main(); });
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ ios_xprobe_main(); });   /* ml1128 */
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ ios_wprof_main(); });   /* ml1129 */
         }
-        if (!getenv("MADEIRA_QUIET"))
+        if (madeira_runtime_profiling_enabled())
         {
             /* iOS-Madeira 2026-07-05 quiet mode: the sampler thread_suspends
              * the game thread ~500x/s (each suspend+get_state+resume steals

@@ -83,7 +83,7 @@ if git.returncode == 0:
                               'app/Madeira/arm64ec-windows/dock-notices.txt'], capture_output=True, text=True).stdout.strip()
     require(tracked == '', 'no built Dock executable or notices are tracked')
     gitlink = subprocess.run(['git', '-C', str(root), 'ls-files', '-s', 'madeira-dock'], capture_output=True, text=True).stdout
-    require(gitlink.startswith('160000 0c5bbd1a854c4c63c47e074b72954aba5b36919d'), 'madeira-dock is pinned at 0c5bbd1')
+    require(gitlink.startswith('160000 bd5b52b715726c05648f6cc0fd6f576eb4b9c532'), 'madeira-dock matches the released r19 fork pin bd5b52b')
 else:
     print('SKIP: not a usable git checkout here; tracked-binary and submodule-pin checks not run')
 
@@ -93,7 +93,11 @@ body = (dock[dock.index('enum MadeiraDock {'):dock.index('    @MainActor private
         dock[dock.index("    /// The host's environment for one launch."):])
 stubs = r'''
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#else
 import Glibc
+#endif
 enum SteamSignIn {
     static func flag(_ name: String, default fallback: Bool) -> Bool { getenv(name).map { String(cString: $0) != "0" } ?? fallback }
 }
@@ -105,7 +109,11 @@ enum SteamRuntimeFiles {
 '''
 checks = r'''
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#else
 import Glibc
+#endif
 var failures = 0
 func require(_ condition: @autoclosure () -> Bool, _ label: String) {
     if condition() { print("PASS: " + label) } else { print("FAIL: " + label); failures += 1 }
@@ -236,7 +244,7 @@ func jwt(_ claims: String) -> String {
 with tempfile.TemporaryDirectory(prefix='madeira-dock-contract-') as tmp:
     tmp = Path(tmp)
     (tmp / 'stubs.swift').write_text(stubs + head)
-    (tmp / 'dock.swift').write_text('import Foundation\nimport Glibc\n' + body)
+    (tmp / 'dock.swift').write_text('import Foundation\n#if canImport(Darwin)\nimport Darwin\n#else\nimport Glibc\n#endif\n' + body)
     (tmp / 'checks.swift').write_text(checks)
     exe = tmp / 'check'
     build = subprocess.run([SWIFTC, '-parse-as-library', '-swift-version', '5', '-sanitize=address', '-o', str(exe),

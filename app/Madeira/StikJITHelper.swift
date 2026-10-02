@@ -106,7 +106,9 @@ enum StikJITHelper {
 
     /// Allocate a JIT memory pool via BRK #0xf00d WITHOUT detaching the debugger.
     /// The debugger stays attached so Wine can use BRK to prepare PE code pages.
-    static func allocatePool(poolSize requestedPoolSize: Int = 128 * 1024 * 1024) -> (rx: UnsafeMutableRawPointer, rw: UnsafeMutableRawPointer, size: Int)? {
+    private(set) static var executableWindowReused = false
+
+    static func allocatePool(poolSize requestedPoolSize: Int = 128 * 1024 * 1024, reuseExecutableWindow: Bool = false) -> (rx: UnsafeMutableRawPointer, rw: UnsafeMutableRawPointer, size: Int)? {
         var poolSize = requestedPoolSize      // ml1036: may shrink to fit, see the hole census below
         poolFailure = nil
         LogStore.shared.log("Allocating \(poolSize / 1024 / 1024)MB JIT pool via debugger...")
@@ -233,7 +235,7 @@ enum StikJITHelper {
         // of >=64MB that fits, and reads the size from WINE_IOS_EXE_WINDOW.
         let exeWinSize: vm_address_t = 0x8000000           // 128MB
         func overlapsExeWindow(_ base: vm_address_t, _ len: vm_address_t) -> Bool {
-            return base < exeWinBase + exeWinSize && base + len > exeWinBase
+            return !executableWindowReused && base < exeWinBase + exeWinSize && base + len > exeWinBase
         }
         let skipWindow = (ProcessInfo.processInfo.environment["MADEIRA_NO_EXE_WINDOW"].map { $0 != "0" } ?? false)
         var windowHeld = false
@@ -285,6 +287,22 @@ enum StikJITHelper {
                 LogStore.shared.log(String(format: "ml1097: occupant of 0x140000000: region 0x%lx+%luMB prot=%d/%d (kr=%d) user_tag=%u share=%d resident=%u pages; %@",
                                            Int(pa), Int(ps >> 20), pinfo.protection, pinfo.max_protection, pkr,
                                            sinfo.user_tag, Int(sinfo.share_mode), sinfo.pages_resident, image), level: .error)
+            }
+        }
+
+        // Only release our own reservation, after checking the game's installed
+        // executables. Fixed-base games and unknown headers keep the old layout.
+        // This merges the 128 MB window with the early pool hole without changing
+        // the Wine/FEX image-copy or code-cache allocation rules.
+        if reuseExecutableWindow && windowHeld {
+            let kr = vm_deallocate(mach_task_self_, exeWinBase, vm_size_t(exeWinSize))
+            if kr == KERN_SUCCESS {
+                windowHeld = false
+                executableWindowReused = true
+                unsetenv("WINE_IOS_EXE_WINDOW")
+                LogStore.shared.log("[jit-window] verified relocatable game: released owned 128MB executable reservation for the JIT pool", level: .success)
+            } else {
+                LogStore.shared.log("[jit-window] could not release executable reservation (kr=\(kr)); keeping fixed-base protection", level: .error)
             }
         }
 
@@ -353,8 +371,9 @@ enum StikJITHelper {
                 let fit = Int(largest) & ~((16 << 20) - 1)
                 if fit >= 256 << 20 {
                     LogStore.shared.log("ml1036: no hole fits a \(poolSize >> 20)MB pool — SHRINKING to \(fit >> 20)MB "
-                        + "(the alternative is a pool in the guest window or on top of 0x140000000, "
-                        + "both of which are fatal)", level: .error)
+                        + (executableWindowReused
+                           ? "(even after reclaiming the executable reservation; guest-window placement remains unsafe)"
+                           : "(the alternative is a pool in the guest window or on top of 0x140000000, both of which are fatal)"), level: .error)
                     poolSize = fit
                     // ml1135: ~400MB of the pool is PE image copies, so below ~500MB FEX's
                     // code cache is starved and rolls over every few seconds in game
@@ -657,5 +676,102 @@ enum StikJITHelper {
         // is sticky post-detach, so an env flag is the reliable signal.
         setenv("MADEIRA_DETACHED", "1", 1)
         LogStore.shared.log("Debugger detached.", level: .success)
+    }
+}
+
+/// Host-only inspection; never executes or modifies a game's files. Unknown
+/// files keep the fixed-image reservation. Check helper executables too, since
+/// Steam can start a bootstrapper before the selected game program.
+enum JITExecutableWindowPolicy {
+    static func canReuse(drive: URL, relativePath: String, steam: Bool) -> Bool {
+        let drive = drive.resolvingSymlinksInPath().standardizedFileURL
+        let target = drive.appendingPathComponent(relativePath).resolvingSymlinksInPath().standardizedFileURL
+        guard target.path.hasPrefix(drive.path + "/") else { return false }
+        let folder = steam ? target : target.deletingLastPathComponent()
+        guard folder.path.hasPrefix(drive.path + "/"),
+              steam || (target.pathExtension.lowercased() == "exe" && canRelocateOutsideWindow(target)) else { return false }
+        var failed = false, count = 0, executables = 0
+        let keys: [URLResourceKey] = [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey]
+        guard let scan = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys,
+            errorHandler: { _, _ in failed = true; return false }) else { return false }
+        for case let url as URL in scan {
+            count += 1
+            guard count <= 10000, let values = try? url.resourceValues(forKeys: Set(keys)) else { return false }
+            if values.isSymbolicLink == true {
+                // Directory links may hide additional launchers. Conservative
+                // refusal also avoids scanning outside this game's directory.
+                return false
+            }
+            if url.pathExtension.lowercased() == "exe" {
+                guard values.isRegularFile == true, canRelocateOutsideWindow(url) else { return false }
+                executables += 1
+            }
+        }
+        return !failed && executables > 0
+    }
+
+    static func canRelocateOutsideWindow(_ url: URL) -> Bool {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? file.close() }
+        guard let length = try? file.seekToEnd() else { return false }
+        func read(_ offset: UInt64, _ count: Int) -> Data? {
+            guard count >= 0, count <= 8 << 20, offset <= length,
+                  UInt64(count) <= length - offset else { return nil }
+            do {
+                try file.seek(toOffset: offset)
+                let data = try file.read(upToCount: count)
+                return data?.count == count ? data : nil
+            } catch { return nil }
+        }
+        func u16(_ data: Data, _ at: Int) -> UInt64 {
+            UInt64(data[at]) | UInt64(data[at + 1]) << 8
+        }
+        func u32(_ data: Data, _ at: Int) -> UInt64 {
+            u16(data, at) | u16(data, at + 2) << 16
+        }
+        guard let dos = read(0, 64), u16(dos, 0) == 0x5a4d else { return false }
+        let pe = u32(dos, 60)
+        guard pe >= 64, pe <= 1 << 20, let coff = read(pe, 24), u32(coff, 0) == 0x4550 else { return false }
+        let machine = u16(coff, 4), sections = u16(coff, 6), optionalSize = u16(coff, 20)
+        guard sections > 0, sections <= 96, optionalSize <= 4096,
+              let optional = read(pe + 24, Int(optionalSize)) else { return false }
+        let plus = machine == 0x8664
+        guard (plus && optionalSize >= 240 && u16(optional, 0) == 0x20b) ||
+              (machine == 0x14c && optionalSize >= 224 && u16(optional, 0) == 0x10b) else { return false }
+        let base = plus ? u32(optional, 24) | u32(optional, 28) << 32 : u32(optional, 28)
+        let imageSize = u32(optional, 56)
+        guard imageSize > 0, base <= UInt64.max - imageSize else { return false }
+        // Executables loaded elsewhere do not need this particular reservation.
+        if base >= 0x148000000 || base + imageSize <= 0x140000000 { return true }
+        guard u16(coff, 22) & 1 == 0, u16(optional, 70) & 0x40 != 0,
+              u32(optional, plus ? 108 : 92) >= 6 else { return false }
+        let directory = plus ? 152 : 136
+        let rva = u32(optional, directory), size = u32(optional, directory + 4)
+        guard rva > 0, size >= 8, size <= 8 << 20, rva <= imageSize,
+              size <= imageSize - rva,
+              let table = read(pe + 24 + optionalSize, Int(sections) * 40) else { return false }
+        for section in 0..<Int(sections) {
+            let at = section * 40
+            let va = u32(table, at + 12), rawSize = u32(table, at + 16), raw = u32(table, at + 20)
+            guard rva >= va, rva - va <= rawSize, size <= rawSize - (rva - va) else { continue }
+            guard let relocations = read(raw + rva - va, Int(size)) else { return false }
+            var cursor = 0, hasRelocation = false
+            while cursor < relocations.count {
+                guard relocations.count - cursor >= 8 else { return false }
+                let page = u32(relocations, cursor), blockSize = u32(relocations, cursor + 4)
+                guard page & 0xfff == 0, blockSize >= 8, blockSize & 1 == 0,
+                      blockSize <= relocations.count - cursor else { return false }
+                for entry in stride(from: cursor + 8, to: cursor + Int(blockSize), by: 2) {
+                    let item = u16(relocations, entry), type = item >> 12
+                    if type == 0 { continue }
+                    guard type == (plus ? 10 : 3), page < imageSize,
+                          (item & 0xfff) + (plus ? 8 : 4) <= imageSize - page else { return false }
+                    hasRelocation = true
+                }
+                cursor += Int(blockSize)
+            }
+            return hasRelocation
+        }
+        return false
     }
 }

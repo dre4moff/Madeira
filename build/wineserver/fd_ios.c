@@ -20,6 +20,9 @@
 
 
 #include "config.h"
+#include "../ntdll-unix/runtime_profiling.h"
+#include "poll_fd_cache.h"
+#include "request_wake_gate.h"
 #include <os/log.h>
 #include <mach/mach_time.h>
 #include <mach/mach_init.h>
@@ -38,11 +41,19 @@
  * of pure pickup+round-trip latency = the 55-vs-60 FPS gap. Clients
  * (ntdll's server_call_unlocked, same process) signal this semaphore
  * right after writing a request; the loop sleeps in semaphore_timedwait
- * and wakes instantly. Extra signals just cause cheap extra scans. */
+ * and wakes instantly. Coalesce outstanding signals to avoid a backlog of
+ * empty scans and EAGAIN reads after a burst has already been handled. */
 semaphore_t ios_srv_wake_sem = 0;
+static struct madeira_request_wake_gate ios_srv_wake_gate;
+static int ios_srv_coalesce = 1;
 void ios_wineserver_wake(void)
 {
-    if (ios_srv_wake_sem) semaphore_signal( ios_srv_wake_sem );
+    semaphore_t sem = __atomic_load_n(&ios_srv_wake_sem, __ATOMIC_ACQUIRE);
+    if (sem && (!ios_srv_coalesce || madeira_request_wake_claim(&ios_srv_wake_gate)))
+    {
+        if (semaphore_signal(sem) != KERN_SUCCESS && ios_srv_coalesce)
+            madeira_request_wake_consumed(&ios_srv_wake_gate);
+    }
 }
 
 /* __WINESRC__ must be defined via -D flag so unicode_fix.h can see it */
@@ -1070,12 +1081,14 @@ static int add_poll_user( struct fd *fd )
         }
         ret = nb_users++;
     }
+    ios_poll_fd_cache_invalidate(ret);
     pollfd[ret].fd = -1;
     pollfd[ret].events = 0;
     pollfd[ret].revents = 0;
     poll_users[ret] = fd;
     active_users++;
-    ws_log("[wineserver-fd] add_poll_user: user=%d unix_fd=%d active_users=%d", ret, fd->unix_fd, active_users);
+    if (madeira_runtime_profiling_cached())
+        ws_log("[wineserver-fd] add_poll_user: user=%d unix_fd=%d active_users=%d", ret, fd->unix_fd, active_users);
     return ret;
 }
 
@@ -1085,6 +1098,7 @@ static void remove_poll_user( struct fd *fd, int user )
     assert( user >= 0 );
     assert( poll_users[user] == fd );
 
+    ios_poll_fd_cache_invalidate(user);
     remove_epoll_user( fd, user );
     pollfd[user].fd = -1;
     pollfd[user].events = 0;
@@ -1182,44 +1196,6 @@ static int get_next_timeout( struct timespec *ts )
  * loops in winhttp. So INET fds get a real zero-timeout poll() each
  * iteration; pipes and the AF_UNIX pair keep the legacy synthesis.
  * Family is cached per (user,fd) — getsockname once per socket. */
-static signed char ios_fd_is_inet( int user, int fd )
-{
-    static int *cache_fd;
-    static signed char *cache_val;
-    static int cache_size;
-
-    if (user >= cache_size)
-    {
-        int newsize = (user + 64) & ~63;
-        int *nfd = realloc( cache_fd, newsize * sizeof(*nfd) );
-        signed char *nval = realloc( cache_val, newsize );
-        if (!nfd || !nval) return 0;
-        memset( nfd + cache_size, 0xff, (newsize - cache_size) * sizeof(*nfd) );
-        cache_fd = nfd; cache_val = nval; cache_size = newsize;
-    }
-    /* ml579: CACHE RESTORED. The ml576 A/B ran 30.8M classifications across two
-     * runs and found the cache would have been wrong TWICE, with ZERO of the
-     * harmful direction (real INET misread as pipe). The stale-(user,fd) theory
-     * is refuted, so the bypass has done its job — and it was expensive: ~188,000
-     * getsockname() calls per second on the server's hot poll path. Steam gives
-     * each CM ping exactly 1000 ms, so starving the poll loop that hard can eat
-     * the deadline before the encrypted /cmping/ request is even written.
-     *
-     * The missing invalidation is still a latent correctness bug (nothing clears
-     * cache_fd/cache_val when add_poll_user/remove_poll_user recycle a slot); it
-     * simply is not the network failure. Fix it on merit, not as a network lead. */
-    if (cache_fd[user] != fd)
-    {
-        struct sockaddr_storage ss;
-        socklen_t slen = sizeof(ss);
-        cache_fd[user] = fd;
-        if (getsockname( fd, (struct sockaddr *)&ss, &slen ) == -1)
-            cache_val[user] = 0;
-        else
-            cache_val[user] = (ss.ss_family == AF_INET || ss.ss_family == AF_INET6);
-    }
-    return cache_val[user];
-}
 
 void main_loop(void)
 {
@@ -1257,6 +1233,7 @@ void main_loop(void)
      * app sandbox. Use usleep-based polling instead. Process timers and
      * check all fds each iteration. */
     {
+        static timeout_t ios_last_poll_report;
         static int ios_iter = 0;
         static int ios_events_fired = 0;
         /* ml585 poll-loop census. AGGREGATE ONLY — emitted at the existing
@@ -1284,10 +1261,13 @@ void main_loop(void)
 
         ws_log("[wineserver-fd] iOS poll loop: master_fd=%d nb_users=%d active=%d", pollfd[0].fd, nb_users, active_users);
         {
-            kern_return_t skr = semaphore_create( mach_task_self(), &ios_srv_wake_sem,
+            semaphore_t sem = 0;
+            const char *coalesce = getenv("MADEIRA_SRV_COALESCE");
+            ios_srv_coalesce = !(coalesce && !strcmp(coalesce, "0"));
+            kern_return_t skr = semaphore_create( mach_task_self(), &sem,
                                                   SYNC_POLICY_FIFO, 0 );
-            ws_log("[wineserver-fd] request-wake semaphore: kr=%d sem=0x%x", skr, ios_srv_wake_sem);
-            if (skr != KERN_SUCCESS) ios_srv_wake_sem = 0;
+            __atomic_store_n(&ios_srv_wake_sem, skr == KERN_SUCCESS ? sem : 0, __ATOMIC_RELEASE);
+            ws_log("[wineserver-fd] request-wake semaphore: kr=%d coalesced=%d", skr, ios_srv_coalesce);
         }
         while (active_users)
         {
@@ -1309,6 +1289,14 @@ void main_loop(void)
             if (!active_users) { ws_log("[wineserver-fd] LOOP EXIT: active_users=0 at iter=%d", ios_iter); break; }
 
             ios_iter++;
+            /* Bounded liveness diagnostics survive quiet mode. One line per
+             * ten seconds, using the clock the poll loop already updates. */
+            if (monotonic_time - ios_last_poll_report >= 10 * TICKS_PER_SEC)
+            {
+                ios_last_poll_report = monotonic_time;
+                ws_log("[srv-poll-live] iter=%d active=%d users=%d inet=%llu events=%d",
+                       ios_iter, active_users, nb_users, ios_c_inet, ios_events_fired);
+            }
             /* Heartbeat via ws_log (file-based, not stderr) */
             if (ios_iter % 50000 == 0)
             {
@@ -1330,7 +1318,7 @@ void main_loop(void)
                 if (qdump_on < 0)
                 {
                     const char *d = getenv("MADEIRA_DESKTOP");
-                    qdump_on = (d && *d == '1');
+                    qdump_on = madeira_runtime_profiling_enabled() && (d && *d == '1');
                 }
                 if (qdump_on)
                 {
@@ -1398,8 +1386,9 @@ void main_loop(void)
                      * wake semaphore and sleeps the computed duration outright.
                      *
                      * Why: semaphore_signal() is a COUNTING operation and
-                     * ios_srv_wake_sem_signal() (line ~42) fires on every
-                     * client request with no coalescing and no drain. Once the
+                     * the historical wake path fired on every client request
+                     * without coalescing. MADEIRA_SRV_COALESCE=0 restores that
+                     * counting path for comparison. Once the
                      * signal rate exceeds the loop rate the count never reaches
                      * zero, semaphore_timedwait returns instantly forever, and
                      * the loop stops sleeping — ml584 measured 2,935 iter/s
@@ -1427,6 +1416,7 @@ void main_loop(void)
                         wts.tv_sec = (unsigned int)(sleep_ns / 1000000000ull);
                         wts.tv_nsec = (int)(sleep_ns % 1000000000ull);
                         wkr = semaphore_timedwait( ios_srv_wake_sem, wts );
+                        if (wkr == KERN_SUCCESS) madeira_request_wake_consumed(&ios_srv_wake_gate);
                         if (wkr == KERN_OPERATION_TIMED_OUT) ios_c_semto++;
                         else ios_c_semret++;
                     }
@@ -1437,7 +1427,10 @@ void main_loop(void)
                         unsigned long long dl;
                         /* drain every queued signal, then sleep the full tick */
                         while (semaphore_timedwait( ios_srv_wake_sem, z ) == KERN_SUCCESS)
+                        {
+                            madeira_request_wake_consumed(&ios_srv_wake_gate);
                             ios_c_semret++;
+                        }
                         if (!tb.denom) mach_timebase_info( &tb );
                         dl = mach_absolute_time() + sleep_ns * tb.denom / tb.numer;
                         mach_wait_until( dl );

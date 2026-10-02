@@ -97,9 +97,9 @@ require('onTapGesture' not in onboarding, 'no hidden gestures')
 require('dock.prepareClient()' in block(view, 'private var dockClientPage'), "components through Dock's verified download")
 
 # ------------------------------------------------------------------ static: sign-in and tokens
-require('SteamSignInView()' in view and 'SteamSignInView()' in settings_section, "sign-in through #45's sheet")
+require('SteamSignInView()' in view and 'open(.steamSignIn)' in settings_section and 'case .steamSignIn: SteamSignInView()' in library, "sign-in through #45's sheet")
 require('signIn.signOut()' in settings_section, "sign-out through #45's model")
-require('MadeiraDockView(start: startDock)' in settings_section, "Settings opens Dock's sheet")
+require('open(.dock)' in settings_section and 'case .dock: MadeiraDockView(start: startDock)' in library, "Settings opens Dock's sheet")
 for forbidden in ['SteamTokenStore', 'credentialsForDock', 'refreshToken', 'SecItem', 'kSec', 'accessToken']:
     require(forbidden not in onboarding, f'Onboarding.swift: no {forbidden} (tokens only via the sign-in store)')
 for line in onboarding.splitlines():

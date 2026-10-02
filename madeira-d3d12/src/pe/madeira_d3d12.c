@@ -1051,6 +1051,12 @@ static HRESULT STDMETHODCALLTYPE alloc_Reset(ID3D12CommandAllocator *This) {
  * opened and closed as the stream demands. Recording never fails for lack
  * of room; what execution cannot do yet is named once in the log and
  * skipped, so a frame is never silently truncated at Close. */
+/* Held by the recorded list; native encoding also retains these until GPU completion. */
+struct mad_dlss_command {
+    obj_handle_t scaler, motion, pipeline;
+    struct mad_resource *resources[5];
+    struct WMTFXTemporalScalerProps props;
+};
 enum mad_ck {
     MC_PSO, MC_ROOT, MC_HEAPS, MC_VP, MC_SCISSOR, MC_TOPO, MC_IB, MC_VB, MC_RTS,
     MC_CLEAR_RT, MC_CLEAR_DS, MC_DRAW, MC_DRAW_INDEXED,
@@ -1060,12 +1066,14 @@ enum mad_ck {
     MC_ROOTSIG, MC_ROOT_CONST, MC_STENCIL_REF,
     MC_CROOTSIG, MC_CROOT, MC_CROOT_CONST,
     MC_QUERY_BEGIN, MC_QUERY_END, MC_QUERY_RESOLVE,   /* ml1088: occlusion queries */
+    MC_TEMPORAL,
     MC_BARRIER,   /* ml1091: a ResourceBarrier; ends an open compute or blit encoder so the fence chain orders what follows */
 };
 struct mad_cmd {
     enum mad_ck kind;
     union {
         struct mad_pso *pso;
+        struct mad_dlss_command *temporal;
         struct { UINT index; UINT64 value; } root;
         struct mad_rootsig *rootsig;
         struct { UINT index, dst, n, data; } rconst;   /* data: offset into the list's constant words */
@@ -1143,6 +1151,19 @@ static void mad_list_note_used(struct mad_list *l, struct mad_resource *r) {
     if (mad_grow((void **)&l->used, &l->ucap, l->nused + 1, sizeof *l->used)) l->used[l->nused++] = r;
 }
 
+static void mad_list_release_temporal(struct mad_list *l) {
+    for (unsigned i = 0; i < l->ncmds; ++i) if (l->cmds[i].kind == MC_TEMPORAL) {
+        struct mad_dlss_command *c = l->cmds[i].u.temporal;
+        if (!c) continue;
+        for (unsigned k = 0; k < 5; ++k) if (c->resources[k])
+            ID3D12Resource_Release((ID3D12Resource *)c->resources[k]);
+        NSObject_release(c->scaler);
+        if (c->motion) NSObject_release(c->motion);
+        if (c->pipeline) NSObject_release(c->pipeline);
+        free(c); l->cmds[i].u.temporal = NULL;
+    }
+}
+
 static HRESULT STDMETHODCALLTYPE list_QI(ID3D12GraphicsCommandList *This, REFIID riid, void **out) {
     struct mad_obj *o = (struct mad_obj *)This;
     /* ml1144: every D3D12 runtime answers GraphicsCommandList1..7 whatever the
@@ -1168,6 +1189,7 @@ static ULONG STDMETHODCALLTYPE list_Release(ID3D12GraphicsCommandList *This) {
         if (l->alloc && !l->closed) InterlockedDecrement(&l->alloc->recording);
         if (l->alloc) ID3D12CommandAllocator_Release((ID3D12CommandAllocator *)l->alloc);
         for (unsigned k = 0; k < l->nrings; k++) NSObject_release(l->rings[k]);
+        mad_list_release_temporal(l);
         free(l->rings); free(l->ring_cpu); free(l->ring_gpu); free(l->cmds); free(l->used); free(l->cdata);
         free(l);
     }
@@ -1198,6 +1220,7 @@ static HRESULT STDMETHODCALLTYPE list_Reset(ID3D12GraphicsCommandList *This,
     InterlockedIncrement(&l->alloc->recording);
     l->recorded_generation = l->alloc->generation;
     l->closed = 0;
+    mad_list_release_temporal(l);
     l->ncmds = 0;
     l->nused = 0;
     l->ncdata = 0;
@@ -4214,6 +4237,42 @@ static void mad_exec_list(struct mad_queue *q, struct mad_list *l, obj_handle_t 
         const struct mad_cmd *c = &l->cmds[i];
         e.cur = i;   /* ml1137 */
         switch (c->kind) {
+        case MC_TEMPORAL: {
+            const struct mad_dlss_command *t = c->u.temporal;
+            exec_end(&e);
+            f6_join(q); /* Gather all pending mode-6 fences before the temporal pass. */
+            struct WMTFXTemporalScalerProps props = t->props;
+            if (t->motion) {
+                obj_handle_t enc = MTLCommandBuffer_computeCommandEncoder(cb, false);
+                obj_handle_t fence = mad_enc_fence_obj(q->device);
+                f6_encode(enc, F6_COMPUTE, &fence, 1, 0);
+                struct wmtcmd_compute_setpso pso = {0};
+                struct wmtcmd_compute_settexture src = {0}, dst = {0};
+                struct wmtcmd_compute_setbytes scale = {0};
+                struct wmtcmd_compute_dispatch dispatch = {0};
+                float xy[2] = {props.motion_vector_scale_x, props.motion_vector_scale_y};
+                pso.type = WMTComputeCommandSetPSO; pso.pso = t->pipeline; pso.threadgroup_size = (struct WMTSize){8, 4, 1};
+                src.type = dst.type = WMTComputeCommandSetTexture;
+                src.texture = t->resources[3]->texture; dst.texture = t->motion; dst.index = 1;
+                scale.type = WMTComputeCommandSetBytes; scale.bytes.ptr = xy; scale.length = sizeof xy;
+                dispatch.type = WMTComputeCommandDispatchThreads;
+                dispatch.size = (struct WMTSize){t->resources[0]->width, t->resources[0]->height, 1};
+                pso.next.ptr = &src; src.next.ptr = &dst; dst.next.ptr = &scale; scale.next.ptr = &dispatch;
+                MTLComputeCommandEncoder_encodeCommands(enc, (struct wmtcmd_base *)&pso);
+                f6_encode(enc, F6_COMPUTE, NULL, 0, fence);
+                MTLCommandEncoder_endEncoding(enc);
+                props.motion_vector_scale_x = props.motion_vector_scale_y = 1;
+            }
+            MTLCommandBuffer_encodeTemporalScale(cb, t->scaler,
+                t->resources[0]->texture, t->resources[1]->texture,
+                t->resources[2]->texture, t->motion ? t->motion : t->resources[3]->texture,
+                t->resources[4] ? t->resources[4]->texture : 0,
+                mad_enc_fence_obj(q->device), &props);
+            e.fence_needed = 1; e.f6_sync_needed = 1; e.f6_list_start = 1;
+            e.f7_reason = 2;
+            exec_note_write(&e, t->resources[1]);
+            break;
+        }
         case MC_PSO: if (c->u.pso && c->u.pso->is_compute) e.cpso = c->u.pso; else e.pso = c->u.pso; break;
         case MC_CROOTSIG: e.crs = c->u.rootsig; break;
         case MC_CROOT: if (c->u.root.index < MAD_ROOT_PARAM_MAX) e.croot[c->u.root.index] = c->u.root.value; break;
@@ -6334,6 +6393,8 @@ static D3D12_COMMAND_QUEUE_DESC * STDMETHODCALLTYPE queue_GetDesc(ID3D12CommandQ
 
 /* ---- resource ------------------------------------------------------------ */
 static ID3D12Resource2Vtbl g_res_vtbl;
+#include "madeira_dlss_abi.h"
+#include "madeira_dlss.h"
 
 /* ml1132: every change to the address index is bracketed by these (live_lock
  * held, so writers are already serialised). The count is odd while the index

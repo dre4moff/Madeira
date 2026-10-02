@@ -1,13 +1,13 @@
 # Fork release and personal runtime setup
 
-Release: `v0.1.1-fork-r20`, based on official Madeira `v0.1.1`. This is an
+Release: `v0.1.1-fork-r21`, based on official Madeira `v0.1.1`. This is an
 unofficial, experimental prerelease. The app is optimized Release (`-O2` native,
-`-O` whole-module Swift), build 4, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
+`-O` whole-module Swift), build 5, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
 The public IPA is unsigned; it needs personal signing/sideloading and JIT.
 
 ## Install
 
-1. Download `Madeira-0.1.1-Fork-r20-Release-unsigned.ipa` from
+1. Download `Madeira-0.1.1-Fork-r21-Release-unsigned.ipa` from
    [this fork's releases](https://github.com/dre4moff/Madeira/releases).
 2. For games needing Microsoft native VC++ runtime, first prepare your personal
    IPA as below. Microsoft binaries are deliberately absent from public assets.
@@ -33,9 +33,9 @@ Run on macOS with Python 3:
 
 ```sh
 python3 tools/prepare-vcruntime-ipa.py \
-  --ipa /path/to/Madeira-0.1.1-Fork-r20-Release-unsigned.ipa \
+  --ipa /path/to/Madeira-0.1.1-Fork-r21-Release-unsigned.ipa \
   --runtime-dir /path/to/your/unmodified-x64-runtime \
-  --output /path/to/Madeira-r20-personal-unsigned.ipa
+  --output /path/to/Madeira-r21-personal-unsigned.ipa
 ```
 
 The helper checks x64 PE headers and intact certificate ranges, preserves DLL
@@ -47,7 +47,7 @@ runtime card switch. These personal files are not public release assets.
 ## Source and rebuilding
 
 ```sh
-git clone --recurse-submodules --branch v0.1.1-fork-r20 \
+git clone --recurse-submodules --branch v0.1.1-fork-r21 \
   https://github.com/dre4moff/Madeira.git
 ```
 
@@ -78,7 +78,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -destination 'generic/platform=iOS' -derivedDataPath .build/release \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO ENABLE_DEBUG_DYLIB=NO \
   GCC_OPTIMIZATION_LEVEL=2 SWIFT_OPTIMIZATION_LEVEL=-O \
-  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym CURRENT_PROJECT_VERSION=4 ENABLE_TESTABILITY=NO build
+  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym CURRENT_PROJECT_VERSION=5 ENABLE_TESTABILITY=NO build
 ```
 
 The historical r17/r18/r19 packagers consume local prior artifacts/checkpoints;
@@ -92,10 +92,10 @@ Do not alter your locally supplied runtime or the source checkout to do so.
 
 The release's verification manifest contains the public asset digest, native
 UUID, unsigned Mach-O inspection, original FEX identities, resource comparison,
-optimization evidence and tests. Matching dSYM UUID:
-`3D4B9344-F234-3A12-80C1-863F0C20D7C8`.
-r20 rebuilds the app and the two D3D12 DLLs; all other public r19 payload files
-are verified byte-identical. See [r20 diagnosis and remaining limits](R20_D3D12_STARTUP.md).
+optimization evidence and tests. Native and dSYM UUIDs match.
+See the current `verification.json` and `dwarfdump --uuid` output; symbols remain outside the IPA.
+r21 rebuilds the app and the two D3D12 DLLs; all other public r20 payload files
+are verified byte-identical. See [r21 diagnosis and remaining limits](R21_MESH_DEPTH.md).
 
 [Complete changes](FORK_CHANGELOG.md) distinguish observed gameplay, synthetic
 operation counts and unverified FPS/graphics outcomes. Compare the same map,

@@ -1,4 +1,4 @@
-# Complete fork changes — Madeira 0.1.1 / r20
+# Complete fork changes — Madeira 0.1.1 / r21
 
 This unofficial fork is based on Will Faust's official `v0.1.1`
 (`ca3183ea3dfb0fd706aff1bea2abb871b5d27aec`). Original copyright and licenses
@@ -8,6 +8,15 @@ The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
 
 ## Compatibility and controls
+
+- **r21 PS-less mesh pipeline correction:** provide a precompiled no-output
+  fragment when a geometry/tessellation pipeline has no game pixel shader.
+  Preserve depth/stencil rasterization and prevent Metal's fatal nil-fragment
+  validation. Existing pixel shaders remain intact. A synthetic host Metal
+  GPU test verifies actual depth writes and unchanged color; on-device game
+  startup remains unverified. Clarify the diagnostic JIT dump and reusable
+  shadercache folder in Storage & caches.
+  [Diagnosis, implementation and validation](R21_MESH_DEPTH.md).
 
 - **r20 D3D12 startup corrections:** repair Metal event lifetime during device
   destruction, report real device-removal status, reclaim all retired heaps and

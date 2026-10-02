@@ -39,6 +39,24 @@ if [ ! -f "$SHADER_DIR/dxmt_command.h" ]; then
     xxd -n dxmt_command -i "$SHADER_DIR/dxmt_command.metallib" > "$SHADER_DIR/dxmt_command.h"
 fi
 
+# Mesh pipelines cannot rasterize with a nil fragment function, even for
+# depth-only passes. Embed a tiny no-output shader for each rendering backend.
+# This is built ahead of time, never compiled on a game's frame path.
+for PLATFORM in ios macos; do
+    if [ "$PLATFORM" = ios ]; then
+        SDK=iphoneos; TARGET=air64-apple-ios18.0
+    else
+        SDK=macosx; TARGET=air64-apple-macos15.0
+    fi
+    xcrun -sdk "$SDK" metal -target "$TARGET" -O2 -c \
+        "$REPO_ROOT/madeira-d3d12/shaders/mesh_null_fragment.metal" \
+        -o "$SHADER_DIR/mesh_null_$PLATFORM.air"
+    xcrun -sdk "$SDK" metallib "$SHADER_DIR/mesh_null_$PLATFORM.air" \
+        -o "$SHADER_DIR/mesh_null_$PLATFORM.metallib"
+    xxd -n "madeira_mesh_null_$PLATFORM" -i "$SHADER_DIR/mesh_null_$PLATFORM.metallib" \
+        > "$SHADER_DIR/mesh_null_$PLATFORM.h"
+done
+
 # Regenerate the stub tables so a toolchain header update cannot silently leave
 # the vtables the wrong length.
 python3 "$SRC/gen_vtables.py" \

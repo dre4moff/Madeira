@@ -197,7 +197,7 @@ struct CacheStorageSettings: View {
             }.disabled(cleaning || !CacheMaintenance.available)
             if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.secondary) }
         } header: { Text("Storage & caches") } footer: {
-            Text("Cleans leftover temporary files at startup. Shader caches unused for 30 days are removed only above the target; recent caches are kept even above it to avoid recompilation. Games, saves and Steam data are preserved. Restart Madeira after playing to clean safely.")
+            Text("Cleans leftover temporary files at startup. The shadercache folder stores compiled shaders for reuse. Shader caches unused for 30 days are removed only above the target; recent caches are kept even above it to avoid recompilation. The old fex-jit-dump.bin file was a diagnostic dump, not the running JIT, and is no longer generated automatically. Games, saves and Steam data are preserved. Restart Madeira after playing to clean safely.")
         }
     }
 }

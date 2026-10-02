@@ -55,7 +55,7 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>MadeiraBuild</key>
-	<string>0.1.1 r20-d3d12-startup / D3D12 device lifetime + removal status / VC Runtime + DX11 + MetalFX + controller fixes / official FEX Windows engine / optimized Release</string>
+	<string>0.1.1 r21-mesh-depth / D3D12 PS-less mesh depth/stencil fix / VC Runtime + DX11 + MetalFX + controller fixes / official FEX Windows engine / optimized Release</string>
 	<key>MadeiraProfileBuild</key>
 	<false/>
 </dict>

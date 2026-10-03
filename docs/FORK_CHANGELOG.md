@@ -1,4 +1,4 @@
-# Complete fork changes — Madeira 0.1.3 / r28
+# Complete fork changes — Madeira 0.1.3 / r29
 
 This unofficial fork is based on Will Faust's official `v0.1.3`
 (`4e9d45a74294cd820120791c4b3f2b79adf4fc70`). Original copyright and licenses
@@ -6,6 +6,21 @@ are retained. Fork changes were prepared with AI assistance and are offered
 for inspection, not as an upstream endorsement or a guaranteed FPS increase.
 The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
+
+## r29 — Texture streaming overhead and upload memory
+
+- Extend direct local shared-memory copies to streamed D3D11 texture updates,
+  preserving row/depth data and remote fallback in immediate/deferred contexts.
+- Use 8 MiB blocks for iOS 64-bit CPU upload rings, reuse completed upload
+  sequences immediately and retain at most two medium-size blocks with expiry.
+- Submit creation-time upload batches at 64 MiB boundaries with the original
+  owning shared-event sequence and two-buffer GPU queue.
+- Retain shader cache identity, native archives, FEX, Dock, D3D12 and all r28
+  fixes/features. Swap is working in the supplied log and remains unchanged;
+  its capacity does not raise iOS's process footprint limit.
+- Optimized Release, build 13. See [r29 analysis and verification](R29_TEXTURE_STREAMING.md).
+  Host tests prove the changed operations; phone FPS and rendering acceptance
+  remain separate.
 
 ## r28 — Official Madeira 0.1.3 integration
 

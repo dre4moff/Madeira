@@ -4,7 +4,7 @@ Unofficial fork based on [Will Faust's Madeira 0.1.3](https://github.com/willfau
 The original app and engines are credited below. This fork adds per-game VC++
 runtime and DX11 controls, controller integration fixes, experimental DLSS-to-
 MetalFX bridges for DX11/DX12, cache maintenance, real microphone capture, worker context and fullscreen fixes,
-and measured-overhead reductions. The current release is **0.1.3 Fork r28**;
+and texture streaming overhead reductions. The current release is **0.1.3 Fork r29**;
 all official 0.1.3 features are integrated, including built-in StikJIT, Steam
 Cloud saves and physical controllers as keyboard/mouse.
 
@@ -12,7 +12,7 @@ Cloud saves and physical controllers as keyboard/mouse.
 [unsigned release and personal VC runtime setup](docs/FORK_RELEASE.md),
 [PS-less D3D12 mesh pipeline correction](docs/R21_MESH_DEPTH.md),
 [D3D12 startup corrections](docs/R20_D3D12_STARTUP.md),
-[performance analysis](docs/R19_PERFORMANCE.md).
+[texture streaming and memory analysis](docs/R29_TEXTURE_STREAMING.md).
 The latest patch is compiled and synthetically tested; higher on-device FPS and
 universal DLSS compatibility are not established. Microsoft runtime DLLs are
 not distributed. FEX remains at the original Madeira pin, with no forked FEX

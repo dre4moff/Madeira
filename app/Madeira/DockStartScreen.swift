@@ -38,6 +38,7 @@ struct SteamLaunchWindow: Equatable {
     var drawn: Bool
     var pid: UInt32 = 0
     var hwnd: UInt64 = 0
+    var metal: Bool = false
 }
 
 /// What a Dock start is showing.
@@ -104,7 +105,7 @@ enum SteamLaunchScene: Equatable {
     static func decide(_ windows: [SteamLaunchWindow], rendered: Bool, places: Places,
                        early: Set<UInt64> = [], installerReveal: Bool = true) -> (scene: SteamLaunchScene, window: SteamLaunchWindow?) {
         var steam: SteamLaunchWindow?
-        for window in windows where window.visible {
+        for window in windows.sorted(by: { $0.metal && !$1.metal }) where window.visible {
             let gameSized = window.width >= gameMinimum.width && window.height >= gameMinimum.height
             let dialogSized = window.width >= dialogMinimum.width && window.height >= dialogMinimum.height
             let installer = early.contains(window.hwnd)
@@ -286,19 +287,24 @@ final class DockStartScreen: ObservableObject {
     /// A library session begins; `game` is set for a Dock start.
     func begin(_ game: DockGame?, at start: Date) {
         endHold(reason: nil)
+        winios_set_game_window(0)
+        winios_window_census_enable(0)
         active = game != nil; appID = game?.id; failure = nil
         exitObserved = false; hostStarted = false; early = []; started = start
         authSubmittedAt = nil; authStallReported = false
-        guard let game, MadeiraConfig.flag("MADEIRA_DOCK_HIDE_DESKTOP") else { return }   // 0: a Dock start's starting screen ends on the desktop's first frame, as before
+        guard let game else { return }
+        winios_window_census_enable(1)
+        guard MadeiraConfig.flag("MADEIRA_DOCK_HIDE_DESKTOP") else { return }   // 0: skip the starting screen; recognized games still fill the presentation area
         let hold = SteamLaunchHold(autoReveal: MadeiraConfig.flag("MADEIRA_DOCK_AUTO_REVEAL"))   // 0: a window that may need the user never reveals the desktop by itself (Show desktop still does)
         self.hold = hold; sceneLines = 0; holding = true
-        winios_window_census_enable(1)
         LogStore.shared.log("[steam-launch-view] hold app=\(game.id) auto-reveal=\(hold.autoReveal ? 1 : 0)")
     }
 
     /// The session ended.
     func finish() {
         endHold(reason: "session-ended")
+        winios_set_game_window(0)
+        winios_window_census_enable(0)
         active = false; appID = nil; failure = nil
     }
 
@@ -333,7 +339,6 @@ final class DockStartScreen: ObservableObject {
                 }
             }
         }
-        guard var hold else { return }
         if !hostStarted {
             hostStarted = DockStartStatus.hostStarted((report ?? MainActor.assumeIsolated { MadeiraDock.pollReport() }).fields)
         }
@@ -342,6 +347,11 @@ final class DockStartScreen: ObservableObject {
         if !hostStarted { for window in windows where window.visible { early.insert(window.hwnd) } }
         let installerReveal = MadeiraConfig.flag("MADEIRA_DOCK_INSTALLER_REVEAL")   // 0: a one-time installer's dialog never reveals the desktop by itself
         let decision = SteamLaunchScene.decide(windows, rendered: rendered, places: places, early: early, installerReveal: installerReveal)
+        if decision.scene == .game, let window = decision.window, window.metal,
+           SteamLaunchScene.owner(window.image, places: places) == .other {
+            winios_set_game_window(window.hwnd)
+        }
+        guard var hold else { return }
         if decision.scene != hold.scene, sceneLines < 24 {
             sceneLines += 1
             let window = decision.window.map {
@@ -388,7 +398,6 @@ final class DockStartScreen: ObservableObject {
         }
         hold = nil
         holding = false; attention = false
-        winios_window_census_enable(0)
     }
 
     /// Winios.m's census as SteamLaunchScene reads it.
@@ -398,7 +407,7 @@ final class DockStartScreen: ObservableObject {
         return raw.prefix(max(0, min(count, raw.count))).map { window in
             let image = withUnsafeBytes(of: window.image) { bytes in String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self) }
             return SteamLaunchWindow(image: image, width: Int(window.w), height: Int(window.h), visible: window.visible != 0,
-                                     drawn: window.presents > 0 || window.metal != 0, pid: window.pid, hwnd: window.hwnd)
+                                     drawn: window.presents > 0 || window.metal != 0, pid: window.pid, hwnd: window.hwnd, metal: window.metal != 0)
         }
     }
 }

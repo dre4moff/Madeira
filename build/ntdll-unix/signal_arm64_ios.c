@@ -546,18 +546,79 @@ struct ios_thread_entry {
     thread_t mach_thread;
     uintptr_t teb;
     void *trampoline;
+    unsigned generation;
+    unsigned pinned_refs;
 };
 static struct ios_thread_entry ios_thread_registry[IOS_MAX_WINE_THREADS];
 static volatile int32_t ios_thread_count = 0;
+static pthread_mutex_t ios_thread_registry_lock = PTHREAD_MUTEX_INITIALIZER;
+int ios_thread_registry_count(void);
 
-/* Exact-match registry probe — NO slot-0 fallback.
- *
- * ml540: ios_lookup_thread() returns 1 even when it fell back to slot 0, so no
- * caller can use it to answer "is this a guest thread at all?". Fault handling
- * needs exactly that: since #67 we hold the TASK-level exception port, so this
- * handler now sees faults from EVERY thread in the process — including the
- * SwiftUI UI thread, which has no TEB and must never be handed guest exception
- * delivery. */
+static int ios_thread_snapshot(int i, struct ios_thread_entry *out)
+{
+    struct ios_thread_entry *e = &ios_thread_registry[i];
+    unsigned gen = __atomic_load_n(&e->generation, __ATOMIC_ACQUIRE);
+    if (gen & 1) return 0;
+    out->mach_thread = __atomic_load_n(&e->mach_thread, __ATOMIC_RELAXED);
+    out->teb = __atomic_load_n(&e->teb, __ATOMIC_RELAXED);
+    out->trampoline = __atomic_load_n(&e->trampoline, __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    return out->mach_thread && out->teb && gen == __atomic_load_n(&e->generation, __ATOMIC_ACQUIRE);
+}
+
+/* The bounded slot high-water mark is independent of cumulative worker starts.
+ * Readers in signal handlers remain lock-free. Publish the port last and
+ * invalidate it before recycling an entry. Only confirmed dead Mach threads
+ * may be retired; an unexpected thread_info failure retains the entry. */
+static int ios_register_thread(thread_t port, uintptr_t teb, void *trampoline)
+{
+    int i, slot = -1, count;
+    pthread_mutex_lock(&ios_thread_registry_lock);
+    count = ios_thread_registry_count();
+    for (i = 0; i < count; i++)
+        if (ios_thread_registry[i].mach_thread == port) { slot = i; break; }
+    if (slot < 0)
+        for (i = 0; i < count; i++)
+        {
+            thread_t old = ios_thread_registry[i].mach_thread;
+            struct thread_basic_info info;
+            mach_msg_type_number_t length = THREAD_BASIC_INFO_COUNT;
+            kern_return_t kr;
+            if (!old) { slot = i; break; }
+            kr = thread_info(old, THREAD_BASIC_INFO, (thread_info_t)&info, &length);
+            if (kr != KERN_INVALID_ARGUMENT && kr != MACH_SEND_INVALID_DEST && kr != KERN_TERMINATED)
+                continue;
+            __atomic_fetch_add(&ios_thread_registry[i].generation, 1, __ATOMIC_ACQ_REL);
+            __atomic_store_n(&ios_thread_registry[i].mach_thread, 0, __ATOMIC_RELAXED);
+            /* Release exactly the four registry-owned references. */
+            for (unsigned ref = 0; ref < ios_thread_registry[i].pinned_refs; ref++)
+                mach_port_deallocate(mach_task_self(), old);
+            ios_thread_registry[i].pinned_refs = 0;
+            __atomic_fetch_add(&ios_thread_registry[i].generation, 1, __ATOMIC_RELEASE);
+            slot = i;
+            break;
+        }
+    if (slot < 0 && count < IOS_MAX_WINE_THREADS) slot = count;
+    if (slot >= 0)
+    {
+        int existing = ios_thread_registry[slot].mach_thread == port;
+        struct ios_thread_entry *e = &ios_thread_registry[slot];
+        __atomic_fetch_add(&e->generation, 1, __ATOMIC_ACQ_REL);
+        __atomic_store_n(&e->mach_thread, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->teb, teb, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->trampoline, trampoline, __ATOMIC_RELAXED);
+        if (!existing && mach_port_mod_refs(mach_task_self(), port, MACH_PORT_RIGHT_SEND, 4) == KERN_SUCCESS)
+            e->pinned_refs = 4;
+        __atomic_store_n(&e->mach_thread, port, __ATOMIC_RELAXED);
+        __atomic_fetch_add(&e->generation, 1, __ATOMIC_RELEASE);
+        if (slot == count) __sync_lock_test_and_set(&ios_thread_count, count + 1);
+    }
+    pthread_mutex_unlock(&ios_thread_registry_lock);
+    return slot;
+}
+
+/* Exact-match probes. Task-level exceptions also include native UI threads;
+ * an unregistered thread must never receive another thread's guest context. */
 /* ml559: read-only accessors so other TUs can walk the registry without the
  * array itself leaving this file (ntdll-unix globals crossing TUs have broken
  * pseudo-processes before — see the S1 CreateProcess rule). Lock-free, same
@@ -571,13 +632,15 @@ int ios_thread_registry_count(void)
 uintptr_t ios_thread_registry_teb(int i)
 {
     if (i < 0 || i >= IOS_MAX_WINE_THREADS) return 0;
-    return ios_thread_registry[i].teb;
+    struct ios_thread_entry e;
+    return ios_thread_snapshot(i, &e) ? e.teb : 0;
 }
 
 thread_t ios_thread_registry_mach(int i)
 {
     if (i < 0 || i >= IOS_MAX_WINE_THREADS) return 0;
-    return ios_thread_registry[i].mach_thread;
+    struct ios_thread_entry e;
+    return ios_thread_snapshot(i, &e) ? e.mach_thread : 0;
 }
 
 static int ios_thread_is_registered(thread_t mach_thread)
@@ -585,7 +648,10 @@ static int ios_thread_is_registered(thread_t mach_thread)
     int count = __sync_fetch_and_add(&ios_thread_count, 0);
     if (count > IOS_MAX_WINE_THREADS) count = IOS_MAX_WINE_THREADS;
     for (int i = 0; i < count; i++)
-        if (ios_thread_registry[i].mach_thread == mach_thread) return 1;
+    {
+        struct ios_thread_entry e;
+        if (ios_thread_snapshot(i, &e) && e.mach_thread == mach_thread) return 1;
+    }
     return 0;
 }
 
@@ -603,7 +669,10 @@ static int ios_teb_is_registered(uintptr_t teb)
     if (!teb) return 0;
     if (count > IOS_MAX_WINE_THREADS) count = IOS_MAX_WINE_THREADS;
     for (int i = 0; i < count; i++)
-        if (ios_thread_registry[i].teb == teb) return 1;
+    {
+        struct ios_thread_entry e;
+        if (ios_thread_snapshot(i, &e) && e.teb == teb) return 1;
+    }
     return 0;
 }
 
@@ -614,19 +683,25 @@ static int ios_teb_is_registered(uintptr_t teb)
  * called from the guest-window teardown (virtual_ios.c). */
 int ios_thread_registry_purge_range( uintptr_t base, uintptr_t size )
 {
-    int count = ios_thread_registry_count(), purged = 0, i;
-
+    int count, purged = 0, i;
+    pthread_mutex_lock(&ios_thread_registry_lock);
+    count = ios_thread_registry_count();
     for (i = 0; i < count; i++)
     {
-        uintptr_t teb = ios_thread_registry[i].teb;
-
+        struct ios_thread_entry *e = &ios_thread_registry[i];
+        uintptr_t teb = e->teb;
+        thread_t port = e->mach_thread;
         if (!teb || teb < base || teb - base >= size) continue;
-        ios_thread_registry[i].mach_thread = 0;
-        __sync_synchronize();
-        ios_thread_registry[i].teb = 0;
-        ios_thread_registry[i].trampoline = NULL;
+        __atomic_fetch_add(&e->generation, 1, __ATOMIC_ACQ_REL);
+        __atomic_store_n(&e->mach_thread, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->teb, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&e->trampoline, NULL, __ATOMIC_RELAXED);
+        for (unsigned ref = 0; ref < e->pinned_refs; ref++) mach_port_deallocate(mach_task_self(), port);
+        e->pinned_refs = 0;
+        __atomic_fetch_add(&e->generation, 1, __ATOMIC_RELEASE);
         purged++;
     }
+    pthread_mutex_unlock(&ios_thread_registry_lock);
     return purged;
 }
 
@@ -659,37 +734,45 @@ static int ios_lookup_thread(thread_t mach_thread, uintptr_t *teb_out, void **tr
     if (count > IOS_MAX_WINE_THREADS) count = IOS_MAX_WINE_THREADS;
     for (int i = 0; i < count; i++)
     {
-        if (ios_thread_registry[i].mach_thread == mach_thread)
+        struct ios_thread_entry e;
+        if (ios_thread_snapshot(i, &e) && e.mach_thread == mach_thread)
         {
-            *teb_out = ios_thread_registry[i].teb;
-            *tramp_out = ios_thread_registry[i].trampoline;
+            *teb_out = e.teb;
+            *tramp_out = e.trampoline;
             return 1;
         }
-    }
-    /* Fallback: use first registered thread */
-    /* ml390 (task #66): a thread that registered CORRECTLY (0184: idx=75 port
-     * 0x4493 teb ok) later resolved to the slot-0 TEB here — either the
-     * exception message named the thread differently than mach_thread_self()
-     * did at registration (name drift), or the entry was clobbered.  Print the
-     * sought name so it can be diffed against the registration line offline. */
-    {
-        static int miss_n;
-        if (miss_n < 32)
-        {
-            miss_n++;
-            ERR( "[reg-miss] #%d port=0x%x not in registry (count=%d) -> slot-0 fallback teb=%p\n",
-                 miss_n, mach_thread, count, count > 0 ? (void *)ios_thread_registry[0].teb : NULL );
-        }
-    }
-    if (count > 0)
-    {
-        *teb_out = ios_thread_registry[0].teb;
-        *tramp_out = ios_thread_registry[0].trampoline;
-        return 1;
     }
     *teb_out = 0;
     *tramp_out = NULL;
     return 0;
+}
+
+/* A Mono helper's emitted return reads CPUArea through x18. Darwin may
+ * clear x18 across the native call, or a former registry miss supplied a
+ * different thread's TEB. Repair only this exact helper epilogue, and only
+ * when the correct CPUArea still names the interrupted x28 StateFrame.
+ * Retry the original store: do not skip the callback flag or alter guest
+ * registers. No PE engine or generated code bytes are changed. */
+static int ios_repair_mono_callback_return(uint64_t pc, uint64_t fault,
+                                           uintptr_t teb, uint64_t gpr[29])
+{
+    uint32_t words[3];
+    uint64_t area = 0, frame = 0;
+    unsigned char callback = 0;
+    mach_vm_size_t got = 0;
+    if (fault != 1 || !teb || !gpr[28] || gpr[11] || pc < 0x100000008ULL) return 0;
+    if (mach_vm_read_overwrite(mach_task_self(), pc - 8, sizeof(words),
+                              (mach_vm_address_t)words, &got) != KERN_SUCCESS || got != sizeof(words)) return 0;
+    if (words[0] != 0xd63f0080u || words[1] != 0xf94bc64bu || words[2] != 0x3900057fu) return 0;
+    if (mach_vm_read_overwrite(mach_task_self(), teb + 0x1788, sizeof(area),
+                              (mach_vm_address_t)&area, &got) != KERN_SUCCESS || got != sizeof(area) || !area) return 0;
+    if (mach_vm_read_overwrite(mach_task_self(), area + 0x30, sizeof(frame),
+                              (mach_vm_address_t)&frame, &got) != KERN_SUCCESS || got != sizeof(frame) || frame != gpr[28]) return 0;
+    if (mach_vm_read_overwrite(mach_task_self(), area + 1, sizeof(callback),
+                              (mach_vm_address_t)&callback, &got) != KERN_SUCCESS || got != sizeof(callback) || callback != 1) return 0;
+    gpr[11] = area;
+    gpr[18] = teb;
+    return 1;
 }
 
 /* ml398 (task #60): the webhelper chrome_ipc pump thread wakes ONCE on
@@ -2253,6 +2336,16 @@ static void *ios_mach_exception_thread( void *arg )
                         }
                     }
                 }
+            }
+
+            if (!handled && req->exception == EXC_BAD_ACCESS &&
+                ios_repair_mono_callback_return(
+                    (uint64_t)__darwin_arm_thread_state64_get_pc(state), fault_addr, thread_teb, state.__x))
+            {
+                static unsigned repaired;
+                if (repaired++ < 8)
+                    dprintf(2, "[mono-return] restored owning CPUArea; retrying callback flag store (r27)\n");
+                handled = 1;
             }
 
             /* 3. Emulate [x18, #imm] accesses when x18 == 0.
@@ -4180,66 +4273,33 @@ wx_done: ;
                          * surface the fault instead of corrupting it away. */
                         extern unsigned long long ios_jit_module_base_for_va( unsigned long long va,
                                                                               unsigned long long *size_out );
-                        /* ml306 (task #53): capture Wine's committed-state BEFORE recovery mutates
-                         * anything. This is THE discriminator for whether zero-fill is safe here:
-                         *   VPROT_COMMITTED (0x20) set  -> page held live data; zeros = DATA LOSS or
-                         *                                  a masked use-after-free. ml305's fatal
-                         *                                  (null+0x90 through a pointer read from
-                         *                                  this band, [reclaim-recover] firing
-                         *                                  mid-exception) is the suspected result.
-                         *   clear                       -> lazy-reservation first touch; zeros are
-                         *                                  the contract and recovery is benign.
-                         * Measurement only for now -- behaviour unchanged until at least one run
-                         * says how the 2-4 events per run split. */
+                        /* Read Wine metadata for diagnostics only; absence
+                         * of a Wine view says nothing about FEX heap ownership. */
                         extern unsigned char ios_reclaim_page_vprot( unsigned long long va );
                         unsigned char pg_vprot = ios_reclaim_page_vprot( pg );
                         unsigned long long mod_size = 0;
                         unsigned long long mod_base = ios_jit_module_base_for_va( pg, &mod_size );
                         int mpr = mprotect( (void *)(uintptr_t)pg, RR_PAGE, PROT_READ | PROT_WRITE );
                         int errno_save = errno;
-                        int used_mmap = 0;
-                        if (mpr != 0 && !mod_base)  /* scratch page: fresh zeros ARE the contract */
+                        /* An address band does not establish disposable-cache
+                         * ownership. FEX heap pages can have Wine vprot == 0.
+                         * Never MAP_FIXED fresh zeros over an unknown/live page. */
+                        if (mpr != 0)
                         {
-                            void *r = mmap( (void *)(uintptr_t)pg, RR_PAGE, PROT_READ | PROT_WRITE,
-                                            MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0 );
-                            used_mmap = (r == (void *)(uintptr_t)pg);
-                        }
-                        else if (mpr != 0)
-                        {
-                            static volatile int mrc = 0;
-                            if (__sync_fetch_and_add(&mrc, 1) < 24)
-                                dprintf(STDERR_FILENO,
-                                    "[reclaim-recover] REFUSED zero-fill of LOADED MODULE page pg=0x%llx module=0x%llx+0x%llx rva=0x%llx errno=%d — zeros would destroy code, surfacing fault\n",
-                                    (unsigned long long)pg, mod_base, mod_size,
-                                    (unsigned long long)(pg - mod_base), errno_save);
+                            static unsigned refused;
+                            if (refused++ < 24)
+                                dprintf(2, "[reclaim-recover] REFUSED destructive replacement pg=0x%llx module=0x%llx vprot=%02x errno=%d\n",
+                                        (unsigned long long)pg, mod_base, pg_vprot, errno_save);
                         }
                         int reuse = madvise( (void *)(uintptr_t)pg, RR_PAGE, MADV_FREE_REUSE );
-                        /* iOS-Madeira ml329 (#53 DISCRIMINATOR): remember every page we
-                         * zero-fill, so a later crash can be tested against them instead
-                         * of inferred.
-                         *
-                         * ml326+ml328 both died in FEXCore's IntrusivePooledAllocator
-                         * (ClaimBufferImpl) reading a NULL `next` at offset 8 of a
-                         * fextl::list node -- i.e. a list node full of zeros. Those nodes
-                         * are aligned_alloc'd into FEX's jemalloc heap, which lives in the
-                         * same [0x7c,0x80) band this recovery path re-mmaps. That makes
-                         * "iOS reclaimed the page and we handed the allocator zeros" the
-                         * leading hypothesis -- but the existing verdict string reads
-                         * WINE's vprot, which is 0 for memory FEX allocated through its own
-                         * VirtualAlloc2 path, so it prints "zeros OK" either way and cannot
-                         * settle it. Record the pages; ios_reclaim_pages_report() prints
-                         * them at the fatal SEGV so the two can be correlated directly. */
-                        ios_reclaim_note_page( pg );
                         static volatile int rc = 0;
                         int rcn = __sync_fetch_and_add(&rc, 1);
                         if (rcn < 40 || (rcn % 50) == 0)
                             dprintf(STDERR_FILENO,
-                                "[reclaim-recover] pg=0x%llx fault=0x%llx mprotect=%d(errno=%d) mmap=%d reuse-cancel=%d retry#%u vprot=0x%02x %s\n",
+                                "[reclaim-recover] pg=0x%llx fault=0x%llx mprotect=%d(errno=%d) reuse-cancel=%d retry#%u vprot=0x%02x content-preserved\n",
                                 (unsigned long long)pg, (unsigned long long)fa, mpr, errno_save,
-                                used_mmap, reuse, rr_n[s], pg_vprot,
-                                (pg_vprot & 0x20) ? "WAS-COMMITTED(zeros=DATA-LOSS/UAF!)"
-                                                  : "not-committed(lazy first touch, zeros OK)");
-                        if (mpr == 0 || used_mmap) handled = 1;
+                                reuse, rr_n[s], pg_vprot);
+                        if (mpr == 0) handled = 1;
                     }
                 }
 skip_reclaim_band: ;
@@ -5889,56 +5949,10 @@ static void ios_setup_mach_exception_handler( thread_t pe_thread, uintptr_t teb,
         ios_exc_handler_started = 1;
     }
 
-    /* Register this thread in the registry.
-     * ml384: replace an existing entry for the same port first — the kernel
-     * recycles thread port names, and a stale entry earlier in the array would
-     * shadow the new registration in ios_lookup_thread (first match wins). */
-    int idx, reg_count = __sync_fetch_and_add(&ios_thread_count, 0);
-    if (reg_count > IOS_MAX_WINE_THREADS) reg_count = IOS_MAX_WINE_THREADS;
-    for (idx = 0; idx < reg_count; idx++)
-        if (ios_thread_registry[idx].mach_thread == pe_thread) break;
-    if (idx == reg_count)
-    {
-        idx = __sync_fetch_and_add(&ios_thread_count, 1);
-        if (idx >= IOS_MAX_WINE_THREADS)
-        {
-            ERR("[thread-registry] FULL (%d slots) — thread 0x%x teb=%p NOT registered; "
-                "Mach events on it will resolve to the slot-0 TEB (wrong process!)\n",
-                IOS_MAX_WINE_THREADS, pe_thread, (void *)teb);
-            idx = -1;
-        }
-    }
-    if (idx >= 0)
-    {
-        /* ml390 (task #66): make the replace path LOUD.  If a name gets
-         * recycled while its previous owner still has live guest state, this
-         * overwrite silently redirects that thread's TEB resolution — and a
-         * thread_set_state aimed at the new owner could land on the old one
-         * (zeroed-state suspect).  old_teb!=0 && old_teb!=new_teb = the case
-         * to correlate offline against [reg-miss] and fault dumps. */
-        if (idx < reg_count && ios_thread_registry[idx].teb &&
-            ios_thread_registry[idx].teb != teb)
-            ERR( "[thread-registry] REPLACE idx=%d port=0x%x old_teb=%p new_teb=%p\n",
-                 idx, pe_thread, (void *)ios_thread_registry[idx].teb, (void *)teb );
-        ios_thread_registry[idx].teb = teb;
-        ios_thread_registry[idx].trampoline = trampoline;
-        __sync_synchronize();
-        ios_thread_registry[idx].mach_thread = pe_thread;
-        /* ml401 (tasks #60/#66): EVERY registry port name proved
-         * MACH_SEND_INVALID_DEST when the census sampler tried to use it —
-         * something deallocates the mach_thread_self() ref after we store the
-         * name, leaving the registry full of dead keys ([pump-sample] blind,
-         * and dead names are exactly what the kernel recycles = the #66
-         * wrong-thread hazard).  Pin extra send refs so the name outlives any
-         * stray deallocate; dead-name lingering after thread exit is harmless
-         * and prevents recycling. */
-        {
-            kern_return_t krr = mach_port_mod_refs( mach_task_self(), pe_thread,
-                                                    MACH_PORT_RIGHT_SEND, 4 );
-            if (krr != KERN_SUCCESS)
-                ERR( "[thread-registry] mod_refs(+4) port=0x%x FAILED kr=%d\n", pe_thread, krr );
-        }
-    }
+    int idx = ios_register_thread(pe_thread, teb, trampoline);
+    if (idx < 0)
+        ERR("[thread-registry] FULL (%d live slots) — thread 0x%x not registered; no foreign TEB fallback\n",
+            IOS_MAX_WINE_THREADS, pe_thread);
 
     /* Set exception port for this thread (shared port).
      * ml353: also claim EXC_BAD_INSTRUCTION. udf-class faults (executing

@@ -86,7 +86,7 @@ require(status.index('DockInstallers.poll(drive: MadeiraDock.drive)') < status.i
         "the status line reads the installs' end after polling them, and times the host from it (or from the start)")
 require('SteamGameArtwork(appID: appID)' in library and 'SteamLaunchBackdrop(appID: appID)' in library,
         "a Dock start shows the game's cover and backdrop by App ID")
-require('winios_window_census_enable(1)' in screen and screen.count('winios_window_census_enable(0)') == 1,
+require('winios_window_census_enable(1)' in screen and screen.count('winios_window_census_enable(0)') == 2,
         'the census runs only while a Dock start holds the desktop back')
 require('int winios_drv_foreground_if_owner( HWND hwnd )' in driver and 'GetCurrentThreadId()' in driver and
         'NtUserPostMessage( hwnd, WM_SYSCOMMAND, SC_RESTORE, 0 )' in driver, 'driver helpers: restore posted, front by the own thread')

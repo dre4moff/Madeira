@@ -51,6 +51,9 @@ void winios_post_key(int vk, int down);
  * dispatch inside. */
 void winios_set_compositor_frame(double x, double y, double w, double h);
 void winios_set_desktop_rect(double x, double y, double w, double h, int set);
+/* Present the recognized Dock game's client surface without desktop chrome.
+ * Main thread; hwnd=0 restores the desktop. Guest window geometry is retained. */
+void winios_set_game_window(unsigned long long hwnd);
 
 /* S2 trackpad pointer. (x, y) are ABSOLUTE wine-desktop pixels (the
  * Swift trackpad engine owns the cursor position); flags are raw

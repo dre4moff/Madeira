@@ -133,6 +133,6 @@ with tempfile.TemporaryDirectory() as tmp:
     t = Path(tmp)
     (t / "cas.cpp").write_text(code)
     subprocess.run(["c++", "-std=c++20", "-O1", "-g", "-pthread", "-fsanitize=address,undefined",
-                    "-o", str(t / "cas"), str(t / "cas.cpp"), "-latomic"], check=True)
+                    "-o", str(t / "cas"), str(t / "cas.cpp"), *([] if __import__("sys").platform == "darwin" else ["-latomic"])], check=True)
     subprocess.run([str(t / "cas")], check=True)
 print("PASS: D3D9 device lock / split-lock checks")

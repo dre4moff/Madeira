@@ -7,6 +7,9 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
+content_actions = (root / 'app/Madeira/ContentView.swift').read_text()
+control_action = content_actions[content_actions.index('enum ControlAction:'):content_actions.index('/// One on-screen control.')]
+
 library = (root / 'app/Madeira/Library.swift').read_text()
 helper = library[library.index('enum LibraryLaunchArguments {'):library.index('struct LibraryEntry:')]
 fields = library[library.index('struct LibraryEntry: Codable, Identifiable {'):library.index('    var displayMode:')]
@@ -18,7 +21,7 @@ corpus = ['', '-noaudio', '-dx11 -noaudio', '-path "Maps A"', '""', 'a\tb',
 random.seed(23)
 for _ in range(500):
     corpus.append(''.join(random.choice('ab \\"\t') for _ in range(random.randrange(80))))
-swift = 'import Foundation\nstruct TouchControl: Codable {}\nenum LibraryError: Error {case message(String)}\n' + helper + fields + computed + r'''
+swift = 'import Foundation\nstruct TouchControl: Codable {}\nenum LibraryError: Error {case message(String)}\n' + control_action + helper + fields + computed + r'''
 }
 var entry = LibraryEntry(title: "Test", relativePath: "Games/Test.exe", bits: 64)
 entry.arguments = "-noaudio -path \"Maps A\" -dx12"

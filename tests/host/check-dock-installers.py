@@ -75,7 +75,11 @@ require('Copyright 2026 125hz' in installers.split('\n', 3)[1], 'new file carrie
 game_src = dock[dock.index('/// A game Steam\'s client has installed'):dock.index('/// Madeira Dock: a small headless host')]
 stubs = r'''
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#else
 import Glibc
+#endif
 enum SteamSignIn {
     static func flag(_ name: String, default fallback: Bool) -> Bool { getenv(name).map { String(cString: $0) != "0" } ?? fallback }
 }
@@ -94,7 +98,11 @@ enum MadeiraDock { static let executable = "C:\\windows\\system32\\dockhost.exe"
 
 checks = r'''
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#else
 import Glibc
+#endif
 var failures = 0
 func require(_ condition: @autoclosure () -> Bool, _ label: String) {
     if condition() { print("PASS: " + label) } else { print("FAIL: " + label); failures += 1 }
@@ -245,7 +253,7 @@ func pe(_ url: URL, machine: UInt16) throws {
                   "\"installscript\" { \"run process\" { \"Shared Runtime\" { \"HasRunKey\" \"HKEY_LOCAL_MACHINE\\\\Software\\\\Fixture Shared\" \"process 1\" \"%INSTALLDIR%\\\\_CommonRedist\\\\Shared\\\\2015\\\\setup.exe\" } } }")
         try pe(common.appendingPathComponent("Steamworks Shared/_CommonRedist/Shared/2015/setup.exe"), machine: 0x8664)
         try write(folder.appendingPathComponent("bin/other.vdf"), "\"nothing\" { }")
-        require(DockInstallers.resolve(dir + "\\redist\\tool.exe", drive: drive)?.lastPathComponent == "Tool.EXE", "paths resolve case-insensitively")
+        require(DockInstallers.resolve(dir + "\\redist\\tool.exe", drive: drive)?.lastPathComponent.caseInsensitiveCompare("Tool.EXE") == .orderedSame, "paths resolve case-insensitively")
         require(DockInstallers.resolve(dir + "\\..\\..\\x.exe", drive: drive) == nil && DockInstallers.resolve("D:\\x.exe", drive: drive) == nil &&
                 DockInstallers.resolve(dir + "\\nothing.exe", drive: drive) == nil, "parent references, other drives and absent files do not resolve")
         try FileManager.default.createSymbolicLink(at: folder.appendingPathComponent("link"), withDestinationURL: base)

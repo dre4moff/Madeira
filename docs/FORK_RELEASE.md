@@ -1,19 +1,20 @@
 # Fork release and personal runtime setup
 
-Release: `v0.1.1-fork-r26`, based on official Madeira `v0.1.1`. This is an
+Release: `v0.1.3-fork-r28`, based on official Madeira `v0.1.3`. This is an
 unofficial, experimental prerelease. The app is optimized Release (`-O2` native,
-`-O` whole-module Swift), build 10, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
+`-O` whole-module Swift), build 12, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
 The public IPA is unsigned; it needs personal signing/sideloading and JIT.
 
 ## Install
 
-1. Download `Madeira-0.1.1-Fork-r26-Release-unsigned.ipa` from
+1. Download `Madeira-0.1.3-Fork-r28-Release-unsigned.ipa` from
    [this fork's releases](https://github.com/dre4moff/Madeira/releases).
 2. For games needing Microsoft native VC++ runtime, first prepare your personal
    IPA as below. Microsoft binaries are deliberately absent from public assets.
 3. Sideload/sign with your usual tool and Apple ID. Preserve the same bundle ID
    if updating an existing installation; do not uninstall merely to update.
-4. Enable JIT through Madeira's existing button/StikDebug and check Memory+.
+4. Keep app extensions during sideloading, then configure built-in JIT or
+   StikDebug as described in [JIT.md](JIT.md). Check Memory+ before launching.
 5. On the game's card enable **Native VC++ Runtime** and **Force DirectX 11**
    when needed. RV There Yet? was tested this way. For a DX12 game, leave Force
    DirectX 11 off; the opt-in DLSS/MetalFX bridge supports Madeira D3D12 too.
@@ -38,21 +39,22 @@ Run on macOS with Python 3:
 
 ```sh
 python3 tools/prepare-vcruntime-ipa.py \
-  --ipa /path/to/Madeira-0.1.1-Fork-r26-Release-unsigned.ipa \
+  --ipa /path/to/Madeira-0.1.3-Fork-r28-Release-unsigned.ipa \
   --runtime-dir /path/to/your/unmodified-x64-runtime \
-  --output /path/to/Madeira-r26-personal-unsigned.ipa
+  --output /path/to/Madeira-r28-personal-unsigned.ipa
 ```
 
 The helper checks x64 PE headers and intact certificate ranges, preserves DLL
 bytes and the existing app payload, and refuses to overwrite files or patch a
 signed/already-runtime-bundled IPA. Certificate presence is not a cryptographic
 signature verification. Sign/sideload the **personal** output and enable the
-runtime card switch. These personal files are not public release assets.
+runtime card switch. Keep **MadeiraJITHelper.appex** when the sideloader asks
+about app extensions; built-in JIT requires it. See [JIT setup](JIT.md). These personal files are not public release assets.
 
 ## Source and rebuilding
 
 ```sh
-git clone --recurse-submodules --branch v0.1.1-fork-r26 \
+git clone --recurse-submodules --branch v0.1.3-fork-r28 \
   https://github.com/dre4moff/Madeira.git
 ```
 
@@ -83,13 +85,13 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -destination 'generic/platform=iOS' -derivedDataPath .build/release \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO ENABLE_DEBUG_DYLIB=NO \
   GCC_OPTIMIZATION_LEVEL=2 SWIFT_OPTIMIZATION_LEVEL=-O \
-  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym CURRENT_PROJECT_VERSION=10 ENABLE_TESTABILITY=NO build
+  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym CURRENT_PROJECT_VERSION=12 ENABLE_TESTABILITY=NO build
 ```
 
 The historical r17/r18/r19 packagers consume local prior artifacts/checkpoints;
 they are audit records, not a promise of one-command clean reproducibility.
 For a public package remove Microsoft DLLs, personal terms, provisioning files
-and Apple signatures from a **staging copy**, retain license notices, zip its
+and Apple signatures from every nested executable in a **staging copy**, retain license notices, zip its
 `Payload` directory and verify resources against the pinned official release.
 Do not alter your locally supplied runtime or the source checkout to do so.
 
@@ -99,9 +101,9 @@ The release's verification manifest contains the public asset digest, native
 UUID, unsigned Mach-O inspection, original FEX identities, resource comparison,
 optimization evidence and tests. Native and dSYM UUIDs match.
 See the current `verification.json` and `dwarfdump --uuid` output; symbols remain outside the IPA.
-r26 rebuilds only the host VM archive member and application. All public r25
-payload files except Madeira and Info.plist are byte-identical. See
-[r26 voice-worker diagnosis and validation](R26_VOICE_THREAD_STACKS.md).
+r28 includes the official 0.1.3 app and native changes with all retained fork
+fixes. Native archive comparison verifies that the r27 thread/signal engine
+and unrelated members are preserved. See [r28 integration](R28_UPSTREAM_013.md).
 
 [Complete changes](FORK_CHANGELOG.md) distinguish observed gameplay, synthetic
 operation counts and unverified FPS/graphics outcomes. Compare the same map,

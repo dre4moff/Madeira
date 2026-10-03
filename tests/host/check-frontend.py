@@ -93,9 +93,14 @@ var vsync: Int32 = -1
 func madeira_set_vsync_locked(_ mode: Int32) { vsync = mode }
 enum ProMotionIntent { static var has30Cap = true }
 struct TouchControl: Codable, Equatable { var nx = 0.5 }
+enum ControlAction: Codable, Equatable, Hashable { case none }   // LibraryEntry.controllerBinds
+enum GamepadInput { static let keyboardMouseAvailable = true }   // LibraryEntry's per-game DirectInput choice
 enum LibraryError: LocalizedError { case message(String) }
 func env(_ name: String) -> String? { getenv(name).map { String(cString: $0) } }
 '''
+swift += block(lib, 'enum LibraryMetalFX {') + '\n'
+swift += 'func madeira_supports_spatial_upscaling() -> Int32 { 1 }\nfunc madeira_supports_temporal_upscaling() -> Int32 { 1 }\n'
+swift += block(lib, 'enum LibraryLaunchArguments {') + '\n'
 swift += block(lib, 'struct LibraryEntry: Codable, Identifiable') + '\n'
 swift += block(lib, 'enum SyncEngine: String, CaseIterable, Identifiable') + '\n'
 swift += '\n'.join(l for l in display.splitlines() if not l.startswith('import ')) + '\n'
@@ -168,7 +173,7 @@ expect(env("FEX_X87REDUCEDPRECISION") == nil, "x87: nothing exported unless chos
 expect(env("MADEIRA_CPU_COUNT") == nil && env("DXMT_D9_ANISO_LIMIT") == nil, "no other engine switches are exported")
 expect(env("MADEIRA_FASTSYNC") == "auto" && env("MADEIRA_FASTSYNC_SEM") == "0",
        "no sync keys (Fastsync, the default): the game's fastsync switches are exported")
-expect(LogStore.shared.lines.last == "[display-shape] resolution=1280x720 mode=fit", "the profile's display shape is logged")
+expect(LogStore.shared.lines.contains { $0.hasPrefix("[display-shape] resolution=1280x720 output=1280x720") && $0.hasSuffix("mode=fit") }, "the profile's display shape is logged")
 // Fastsync's per-game switches: exported only when Settings chose Fastsync.
 MadeiraConfig.values = ["inproc-sync": "0"]
 unsetenv("MADEIRA_FASTSYNC"); unsetenv("MADEIRA_FASTSYNC_SEM"); game.applyEnvironment()
@@ -403,7 +408,8 @@ last = form[[m.start() for m in re.finditer(r'\bSection\b', form)][-1]:]
 check('header: { Text("Credits") }' in last and form.count('Text("Credits")') == 1,
       'Settings: Credits is the last section')
 for who in ('name: "Will Faust", handle: "willfaust"', 'name: "Nick", handle: "125hz"',
-            'name: "Jfishin", handle: "Jfishin"'):
+            'name: "Jfishin", handle: "Jfishin"', 'name: "Jesse", handle: "JesseLovelace"',
+            'name: "Dan Perks", handle: "danperks"'):
     check('MadeiraCredit(' + who in last, 'Settings credits: ' + who)
 check('https://github.com/\\(handle)' in block(lib, 'struct MadeiraCredit: View'),
       'a credit links the GitHub account')

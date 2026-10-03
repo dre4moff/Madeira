@@ -75,7 +75,14 @@ prelude = r'''
 #include <fcntl.h>
 #include <assert.h>
 #include <sys/mman.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#endif
+#include "ephemeral_swap.h"
+#ifndef __APPLE__
 #include <linux/falloc.h>
+#endif
 typedef unsigned long ULONG_PTR;
 #define VPROT_READ       0x01
 #define VPROT_WRITE      0x02
@@ -141,11 +148,13 @@ static void *anon_mmap_fixed( void *a, size_t l, int prot, int flags )
 static int fail_malloc;
 static void *test_malloc( size_t n ) { return fail_malloc ? NULL : malloc( n ); }
 #define malloc( n ) test_malloc( n )
+#ifndef __APPLE__
 struct fpunchhole { unsigned fp_flags; unsigned reserved; off_t fp_offset; off_t fp_length; };
 #define F_PUNCHHOLE 99
 static int test_fcntl( int fd, int cmd, struct fpunchhole *ph )
 { (void)cmd; return fallocate( fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, ph->fp_offset, ph->fp_length ); }
 #define fcntl( fd, cmd, arg ) test_fcntl( fd, cmd, arg )
+#endif
 '''
 
 harness = r'''
@@ -169,6 +178,22 @@ static void env( const char *cov, const char *mn, const char *rmax )
 /* protection of the host page at p from /proc/self/maps: "rw", "r-", "--" */
 static const char *prot_of( const void *p )
 {
+#ifdef __APPLE__
+    static char out[3] = "??";
+    mach_vm_address_t at = (mach_vm_address_t)p;
+    mach_vm_size_t size = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object = MACH_PORT_NULL;
+    kern_return_t result = mach_vm_region(mach_task_self(), &at, &size,
+        VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &count, &object);
+    if (object) mach_port_deallocate(mach_task_self(), object);
+    if (result == KERN_SUCCESS && (uintptr_t)p >= at && (uintptr_t)p < at + size) {
+        out[0] = info.protection & VM_PROT_READ ? 'r' : '-';
+        out[1] = info.protection & VM_PROT_WRITE ? 'w' : '-';
+    }
+    return out;
+#else
     static char out[3];
     char line[512];
     FILE *f = fopen( "/proc/self/maps", "r" );
@@ -181,6 +206,7 @@ static const char *prot_of( const void *p )
     }
     if (f) fclose( f );
     return out;
+#endif
 }
 
 static void test_config( void )
@@ -298,7 +324,11 @@ static void test_freelist( void )
 
 static char *region( uintptr_t at, size_t len )
 {
-    void *p = mmap( (void *)at, len, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0 );
+    void *p = mmap( (void *)at, len, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS
+#ifdef MAP_FIXED_NOREPLACE
+ | MAP_FIXED_NOREPLACE
+#endif
+, -1, 0 );
     if (p == MAP_FAILED || p != (void *)at) { printf( "FAIL: cannot map test region at %p (errno %d)\n", (void *)at, errno ); exit( 2 ); }
     return p;
 }
@@ -441,7 +471,7 @@ int main( int argc, char **argv )
     close( fd );
     setenv( "MADEIRA_SWAP_FILE", path, 1 );
     setenv( "MADEIRA_SWAP_MB", "256", 1 );
-    unsetenv( "MADEIRA_SWAP_COVERAGE" );
+    setenv( "MADEIRA_SWAP_COVERAGE", "blocks", 1 );
     ios_swap_init();
     unlink( path );
     if (ios_swap_fd < 0) { printf( "FAIL: tier did not start\n" ); return 1; }
@@ -463,7 +493,7 @@ with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / 'swap.c'
     exe = Path(tmp) / 'swap'
     c.write_text(prelude + core + harness)
-    subprocess.run(['cc', '-O1', '-Wall', '-Wno-unused-function', '-Werror', '-o', str(exe), str(c)], check=True)
+    subprocess.run(['cc', '-O1', '-Wall', '-Wno-unused-function', '-Werror', '-I' + str(root / 'build/ntdll-unix'), '-o', str(exe), str(c)], check=True)
     r = subprocess.run([str(exe)], capture_output=True, text=True, env=dict(os.environ))
     print(r.stdout.strip())
     check(r.returncode == 0, 'swap-tier core run failed:\n' + r.stdout + r.stderr)

@@ -28,6 +28,7 @@ stub = r'''
 #include <errno.h>
 #include <sys/mman.h>
 #include <signal.h>
+static int ios_cage_release_on_exhaustion(void *start, void *end, size_t want) { (void)start;(void)end;(void)want;return 0; }
 #define WINE_IOS 1
 #define _WIN64 1
 #define BOOL int

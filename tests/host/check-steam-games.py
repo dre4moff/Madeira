@@ -85,8 +85,8 @@ for label in ['"Library details"', '"Choose cover image"', '"Use Steam artwork"'
               '"D3D9 anisotropic filtering"', '"On screen"', '"Performance overlay"', '"Live logs"', '"Touch controls"',
               '"Control opacity"', '"Control size"', '"Executable"', '"Game details"']:
     require(label in detail, f'Game details: {label}')
-require('if entry.desktop != true && entry.steamAppID == nil {' in detail,
-        "no Launch arguments for a Steam game: Dock starts Steam's own launch option")
+require('TextField("Custom Launch Arguments", text: $entry.arguments, axis: .vertical)' in detail,
+        'the fork exposes saved custom launch arguments for direct and Steam/Dock games')
 entries_start = library.index('private var entries: [LibraryEntry] {')
 require('$0.steamAppID == nil' in library[entries_start:library.index('var body: some View {', entries_start)],
         'Steam games are listed in the Steam section only, not also under Games')
@@ -190,7 +190,11 @@ body = (dock[dock.index('enum MadeiraDock {'):dock.index('    @MainActor private
         dock[dock.index("    /// The host's environment for one launch."):])
 stubs = r'''
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#else
 import Glibc
+#endif
 enum SteamSignIn {
     static func flag(_ name: String, default fallback: Bool) -> Bool { getenv(name).map { String(cString: $0) != "0" } ?? fallback }
 }
@@ -204,7 +208,11 @@ owned_game = owned_source[owned_source.index('struct SteamOwnedGame:'):owned_sou
 vdf = fetcher[fetcher.index('// MARK: - Simple VDF Binary Parser'):]
 checks = r'''
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#else
 import Glibc
+#endif
 var failures = 0
 func require(_ condition: @autoclosure () -> Bool, _ label: String) {
     if condition() { print("PASS: " + label) } else { print("FAIL: " + label); failures += 1 }
@@ -360,7 +368,7 @@ func record(_ appID: Int, _ name: String, _ folder: String, flags: Int) -> Strin
             "\"x\" { \"executable\" \"not-numbered.exe\" } \"8\" { \"arguments\" \"-no-program\" } " +
             "} } \"depots\" { \"77\" { \"manifests\" { \"public\" { \"gid\" \"1\" } } } } }"
         let directInfo = SteamAppInfo.parse(appID: 7000, from: Data(launchVDF.utf8))!
-        require(directInfo.launches.map(\.executable) == ["bin32\\game.exe", "server/srv.exe", "Direct.app", "Bin64\\\\Game.exe",
+        require(directInfo.launches.map(\.executable) == ["bin32\\game.exe", "server/srv.exe", "Direct.app", "Bin64\\Game.exe",
                                                           "beta/game.exe", "..\\escape.exe", "tools/launcher.exe", "tools/launcher.exe"],
                 "config.launch is read in Steam's numeric order, without entries that name no program: \(directInfo.launches.map(\.executable))")
         require(directInfo.launches[1].type == "server" && directInfo.launches[4].betaKey == "public-beta" &&
@@ -439,7 +447,7 @@ func record(_ appID: Int, _ name: String, _ folder: String, flags: Int) -> Strin
 with tempfile.TemporaryDirectory(prefix='madeira-steam-games-') as tmp:
     tmp = Path(tmp)
     (tmp / 'stubs.swift').write_text(stubs + head)
-    (tmp / 'dock.swift').write_text('import Foundation\nimport Glibc\n' + body)
+    (tmp / 'dock.swift').write_text('import Foundation\n#if canImport(Darwin)\nimport Darwin\n#else\nimport Glibc\n#endif\n' + body)
     (tmp / 'rules.swift').write_text('import Foundation\n' + rules)
     (tmp / 'owned.swift').write_text('import Foundation\n' + owned_game + '\n' + vdf)
     (tmp / 'checks.swift').write_text(checks)

@@ -57,7 +57,12 @@ final class GamepadInput: @unchecked Sendable {
         guard touch || paired else { return }
         // Main actor only: drain the serial publisher before returning to the
         // caller which starts Wine. An asynchronous reservation has no barrier.
-        queue.sync { touchState.reserved = true; sample() }
+        queue.sync {
+            reservedForTouch = touch
+            reservedForPhysical = paired
+            touchState.reserved = touch || (keyboardMouse == nil && paired)
+            sample()
+        }
         LogStore.shared.log("[xinput] ml1990 slot=0 reserved for the session touch=\(touch ? 1 : 0) paired=\(paired ? 1 : 0)")
     }
 
@@ -76,6 +81,41 @@ final class GamepadInput: @unchecked Sendable {
         queue.async { [self] in
             guard active || value == nil else { return }
             touchState.update(owner: owner, control: control, value: value)
+            sample()
+        }
+    }
+
+    /// Keyboard-and-mouse mode (PadKeyboardMouse): nil keeps XInput. Set on the
+    /// main actor by the library for its session; read on `queue`.
+    private var keyboardMouse: PadBindings?
+    private var reservedForTouch = false, reservedForPhysical = false
+
+    /// Availability of the mode. 0 removes the per-game choice; the physical pad then always feeds XInput.
+    static let keyboardMouseAvailable: Bool = flag("MADEIRA_XINPUT") && flag("MADEIRA_PAD_KBM")
+
+    /// Whether keyboard-and-mouse mode is on. Main thread: PadStickMouse ("Right
+    /// stick controls mouse") stands down while it is, since this mode moves the
+    /// mouse (or drives keys) with the same stick.
+    private(set) var keyboardMouseOn = false
+
+    /// Translate player 1's physical pad into keys and mouse (`bindings`) instead
+    /// of publishing it to XInput; nil restores XInput. Touch controls keep
+    /// feeding XInput either way. Main thread.
+    func setKeyboardMouse(_ bindings: PadBindings?) {
+        guard Self.keyboardMouseAvailable else { return }
+        keyboardMouseOn = bindings != nil
+        queue.async { [self] in
+            let was = keyboardMouse != nil
+            if keyboardMouse != nil && keyboardMouse != bindings {
+                PadKeyboardMouse.shared.releaseAll(bindings == nil ? "mode off" : "bindings changed")
+            }
+            keyboardMouse = bindings
+            // A physical pad translated into keys must not retain the fork's
+            // early XInput reservation. Touch controller input stays connected.
+            touchState.reserved = reservedForTouch || (bindings == nil && reservedForPhysical)
+            if was != (bindings != nil) {
+                LogStore.shared.log("[pad-kbm] physical controller as keyboard and mouse: \(bindings != nil ? "on" : "off")")
+            }
             sample()
         }
     }
@@ -154,7 +194,10 @@ final class GamepadInput: @unchecked Sendable {
     private func setActive(_ value: Bool) {
         queue.async { [self] in
             active = value
-            if !value { touchState.clear() }
+            if !value {
+                touchState.clear()
+                if keyboardMouse != nil { PadKeyboardMouse.shared.releaseAll("inactive") }
+            }
             updateTimer()
             sample()
         }
@@ -186,7 +229,16 @@ final class GamepadInput: @unchecked Sendable {
         for i in profiles.indices {
             let pad = profiles[i]
             let touchConnected = i == 0 && touchState.connected
+            // Player 1's pad went away mid-press: nothing feeds the driver now, so
+            // release the keys and buttons it holds.
+            if i == 0, pad == nil, keyboardMouse != nil, PadKeyboardMouse.shared.holding {
+                PadKeyboardMouse.shared.releaseAll("controller disconnected")
+            }
             guard pad != nil || touchConnected else {
+                winios_gamepad_set_state(Int32(i), nil)
+                continue
+            }
+            if i == 0, !active, keyboardMouse != nil, !touchConnected {
                 winios_gamepad_set_state(Int32(i), nil)
                 continue
             }
@@ -218,6 +270,20 @@ final class GamepadInput: @unchecked Sendable {
                     let library = LibraryController.shared
                     library.sample(buttons: state.buttons, lx: state.lx, ly: state.ly)
                     if library.ownsInput {
+                        state = winios_gamepad()
+                        state.connected = 1
+                        if keyboardMouse != nil { PadKeyboardMouse.shared.releaseAll("library menu") }
+                    } else if let kbm = keyboardMouse {
+                        // Keyboard-and-mouse mode: the pad becomes keys and mouse
+                        // motion; XInput sees no physical player 1 (touch may still
+                        // connect it below).
+                        PadKeyboardMouse.shared.feed(buttons: state.buttons, lt: state.left_trigger, rt: state.right_trigger,
+                                                     lx: state.lx, ly: state.ly, rx: state.rx, ry: state.ry,
+                                                     bindings: kbm, focused: HardwareInput.shared.baseFocused)
+                        guard touchConnected else {
+                            winios_gamepad_set_state(Int32(i), nil)
+                            continue
+                        }
                         state = winios_gamepad()
                         state.connected = 1
                     }

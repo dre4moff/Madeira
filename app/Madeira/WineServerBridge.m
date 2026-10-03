@@ -178,6 +178,10 @@ int wineserver_start(const char *prefix_path) {
         madeira_seed_prefix_if_needed(prefix_path);
     }
 
+    {
+        extern int wineserver_ready;
+        __atomic_store_n(&wineserver_ready, 0, __ATOMIC_RELEASE);
+    }
     g_wineserver_running = 1;
 
     /* 2026-07-04 perf: the wineserver thread used to be created at LOWERED
@@ -208,6 +212,11 @@ int wineserver_start(const char *prefix_path) {
 
 int wineserver_is_running(void) {
     return g_wineserver_running;
+}
+
+int wineserver_is_ready(void) {
+    extern int wineserver_ready;
+    return __atomic_load_n(&wineserver_ready, __ATOMIC_ACQUIRE);
 }
 
 void wineserver_stop(void) {

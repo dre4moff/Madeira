@@ -9,7 +9,7 @@
 [submodule "dxmt"]
 	path = dxmt
 	url = https://github.com/dre4moff/dxmt.git
-	branch = codex/compatibility-performance-r19
+	branch = codex/upstream-0.1.3-r28
 [submodule "madeira-dock"]
 	path = madeira-dock
 	url = https://github.com/dre4moff/madeira-dock.git

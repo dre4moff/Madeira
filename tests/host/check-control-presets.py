@@ -235,7 +235,7 @@ window = function(content, 'final class ControlsWindow: UIWindow {')
 assert window.index('if m.editing {') < window.index('!hit.isDescendant(of: root)') \
     < window.index('guard m.hitsInteractive('), 'menu and dialog presentations take their touches in play mode'
 reserve = function(gamepad, '@MainActor func reserveSessionSlot(touchControls: Bool, libraryGame: Bool = false) {')
-assert reserve.index('guard Self.enabled else { return }') < reserve.index('touchState.reserved = true')
+assert reserve.index('guard Self.enabled else { return }') < reserve.index('touchState.reserved = touch || (keyboardMouse == nil && paired)')
 assert 'choice.map({ $0 == "1" }) ?? libraryGame' in reserve
 assert 'guard touch || paired else { return }' in reserve
 assert 'queue.sync' in reserve, 'reservation is published before Wine starts'

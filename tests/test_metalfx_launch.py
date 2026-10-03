@@ -2,6 +2,9 @@
 from pathlib import Path
 import subprocess,tempfile
 root=Path(__file__).resolve().parents[1]
+content_actions = (root / 'app/Madeira/ContentView.swift').read_text()
+control_action = content_actions[content_actions.index('enum ControlAction:'):content_actions.index('/// One on-screen control.')]
+
 l=(root/'app/Madeira/Library.swift').read_text()
 helper=l[l.index('enum LibraryMetalFX {'):l.index('\nstruct LibraryEntry:')]
 fields=l[l.index('struct LibraryEntry:'):l.index('    var displayMode: DisplayMode')]
@@ -9,7 +12,7 @@ prop=l[l.index('    var sessionRenderResolution: String {'):l.index('\n    func 
 view=(root/'app/Madeira/ContentView.swift').read_text()
 start=view.index('            // Explorer must use the same render mode')
 branch=view[start:view.index('            setenv("MADEIRA_EXE"',start)]
-swift='import Foundation\nstruct TouchControl: Codable {}\nvar supported=true\nfunc madeira_supports_spatial_upscaling()->Int32 {supported ? 1 : 0}\nstruct MockLog {func log(_ s:String) {}}\nlet logStore=MockLog()\n'+helper+fields+prop+'}\n'+r'''
+swift='import Foundation\nstruct TouchControl: Codable {}\nvar supported=true\nfunc madeira_supports_spatial_upscaling()->Int32 {supported ? 1 : 0}\nstruct MockLog {func log(_ s:String) {}}\nlet logStore=MockLog()\n'+control_action+helper+fields+prop+'}\n'+r'''
 func dockMode(_ profile: LibraryEntry?) -> String {
  var width=1280,height=720
 '''+branch+r'''

@@ -4,13 +4,16 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
+content_actions = (root / 'app/Madeira/ContentView.swift').read_text()
+control_action = content_actions[content_actions.index('enum ControlAction:'):content_actions.index('/// One on-screen control.')]
+
 source = (root / "app/Madeira/Library.swift").read_text()
 fields = source[source.index("struct LibraryEntry: Codable, Identifiable {"):source.index("    var displayMode: DisplayMode")]
 test = r'''
 import Foundation
 // On-screen controls are unrelated to this test; old fixtures contain none.
 struct TouchControl: Codable {}
-''' + fields + r'''
+''' + control_action + fields + r'''
 }
 var first = LibraryEntry(title: "RV There Yet?", relativePath: "Games/Ride.exe", bits: 64)
 let second = LibraryEntry(title: "Other game", relativePath: "Games/Other.exe", bits: 64)

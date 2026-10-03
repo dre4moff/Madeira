@@ -52,6 +52,17 @@ final class LibraryController {
  var ownsInput = false
  func sample(buttons: UInt16, lx: Int16, ly: Int16) {}
 }
+struct PadBindings: Equatable { var id: Int = 0 }
+final class PadKeyboardMouse {
+ static let shared = PadKeyboardMouse()
+ var holding = false, releases = 0, feeds = 0
+ var lastButtons: UInt16 = 0
+ func releaseAll(_ why: String) { holding = false; releases += 1 }
+ func feed(buttons: UInt16, lt: UInt8, rt: UInt8, lx: Int16, ly: Int16, rx: Int16, ry: Int16, bindings: PadBindings, focused: Bool) {
+   holding = buttons != 0 || lx != 0 || ly != 0; lastButtons = buttons; feeds += 1
+ }
+}
+final class HardwareInput { static let shared = HardwareInput(); var baseFocused = true }
 struct winios_gamepad {
  var connected: UInt32 = 0, packet: UInt32 = 0
  var buttons: UInt16 = 0
@@ -81,6 +92,31 @@ extension GamepadInput {
    model.start(); model.reserveSessionSlot(touchControls: true, libraryGame: true)
    model.drain(); assert(snapshot().connected == 0)
    print("PASS: XInput disable switch respected"); return
+ }
+ if CommandLine.arguments.contains("keyboard") {
+   let physical = GCController(), pad = physical.extendedGamepad!
+   GCController.devices = [physical]
+   model.start(); model.activity(true)
+   model.reserveSessionSlot(touchControls: false, libraryGame: true)
+   assert(snapshot().connected == 1)
+   model.fixtures { pad.buttonB.isPressed = true; pad.leftThumbstick.xAxis.value = 1 }
+   model.setKeyboardMouse(PadBindings()); model.drain()
+   assert(snapshot().connected == 0 && PadKeyboardMouse.shared.lastButtons == 0x2000)
+   let releases = PadKeyboardMouse.shared.releases
+   model.setKeyboardMouse(PadBindings()); model.drain()
+   assert(PadKeyboardMouse.shared.releases == releases)
+   model.setKeyboardMouse(PadBindings(id: 1)); model.drain()
+   assert(PadKeyboardMouse.shared.releases == releases + 1 && PadKeyboardMouse.shared.holding)
+   model.setKeyboardMouse(nil); model.drain()
+   assert(!PadKeyboardMouse.shared.holding && snapshot().connected == 1 && snapshot().buttons == 0x2000)
+   model.setKeyboardMouse(PadBindings()); model.drain()
+   model.activity(false); assert(!PadKeyboardMouse.shared.holding && snapshot().connected == 0)
+   model.activity(true); assert(PadKeyboardMouse.shared.holding)
+   GCController.devices = []; model.reserveSessionSlot(touchControls: true, libraryGame: true); model.drain()
+   assert(!PadKeyboardMouse.shared.holding && snapshot().connected == 1)
+   model.touch(owner: UUID(), control: UUID(), value: nil); model.drain()
+   print("PASS: keyboard mode suppresses physical XInput reservation, rebind releases old keys, identical binds do not stutter, background/disconnect release, touch reservation retained")
+   return
  }
  model.start(); model.drain()
  assert(snapshot().connected == 0)
@@ -133,3 +169,4 @@ with tempfile.TemporaryDirectory(prefix='madeira-pad-publisher-') as tmp:
     subprocess.run(['swiftc', '-parse-as-library', str(tmp / 'check.swift'), '-o', str(tmp / 'check')], check=True)
     subprocess.run([str(tmp / 'check')], check=True)
     subprocess.run([str(tmp / 'check'), 'disabled'], check=True)
+    subprocess.run([str(tmp / 'check'), 'keyboard'], check=True)

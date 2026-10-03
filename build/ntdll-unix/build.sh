@@ -48,12 +48,14 @@ compile_one() {
 
 # Recompile one selected host shim, preserving all unrelated engine objects.
 # Useful for a targeted fix without rebuilding network/crypto modules.
-if [ "${MADEIRA_ONLY:-}" = "signal_arm64" ] || [ "${MADEIRA_ONLY:-}" = "audio_null_ios" ] || [ "${MADEIRA_ONLY:-}" = "virtual" ]; then
+if [ "${MADEIRA_ONLY:-}" = "signal_arm64" ] || [ "${MADEIRA_ONLY:-}" = "audio_null_ios" ] || [ "${MADEIRA_ONLY:-}" = "virtual" ] || [ "${MADEIRA_ONLY:-}" = "process" ]; then
     test -f "$APP_LIB" && test -f "$WINE_BUILD/include/config.h"
     if [ "$MADEIRA_ONLY" = "audio_null_ios" ]; then
         compile_one "$BUILD_DIR/audio_null_ios.c" "audio_null_ios"
     elif [ "$MADEIRA_ONLY" = "virtual" ]; then
         compile_one "$BUILD_DIR/virtual_ios.c" "virtual"
+    elif [ "$MADEIRA_ONLY" = "process" ]; then
+        compile_one "$BUILD_DIR/process_ios.c" "process"
     else
         compile_one "$BUILD_DIR/signal_arm64_ios.c" "signal_arm64"
     fi

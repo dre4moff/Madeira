@@ -34,7 +34,7 @@ fi
 SHADER_DIR="$REPO_ROOT/build/dxmt-ios/shader-headers"
 if [ ! -f "$SHADER_DIR/dxmt_command.h" ]; then
     mkdir -p "$SHADER_DIR"
-    xcrun -sdk macosx metal -o "$SHADER_DIR/dxmt_command.air" -c "$REPO_ROOT/dxmt/src/dxmt/dxmt_command.metal"
+    xcrun -sdk macosx metal -std=metal3.1 --target=air64-apple-macos14.0 -o "$SHADER_DIR/dxmt_command.air" -c "$REPO_ROOT/dxmt/src/dxmt/dxmt_command.metal"
     xcrun -sdk macosx metallib -o "$SHADER_DIR/dxmt_command.metallib" "$SHADER_DIR/dxmt_command.air"
     xxd -n dxmt_command -i "$SHADER_DIR/dxmt_command.metallib" > "$SHADER_DIR/dxmt_command.h"
 fi
@@ -48,7 +48,7 @@ for PLATFORM in ios macos; do
     else
         SDK=macosx; TARGET=air64-apple-macos15.0
     fi
-    xcrun -sdk "$SDK" metal -target "$TARGET" -O2 -c \
+    xcrun -sdk "$SDK" metal -std=metal3.1 -target "$TARGET" -O2 -c \
         "$REPO_ROOT/madeira-d3d12/shaders/mesh_null_fragment.metal" \
         -o "$SHADER_DIR/mesh_null_$PLATFORM.air"
     xcrun -sdk "$SDK" metallib "$SHADER_DIR/mesh_null_$PLATFORM.air" \

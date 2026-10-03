@@ -5,11 +5,14 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
+content_actions = (root / 'app/Madeira/ContentView.swift').read_text()
+control_action = content_actions[content_actions.index('enum ControlAction:'):content_actions.index('/// One on-screen control.')]
+
 library = (root / "app/Madeira/Library.swift").read_text()
 helper = library[library.index("enum LibraryLaunchArguments {"):library.index("struct LibraryEntry:")]
 fields = library[library.index("struct LibraryEntry: Codable, Identifiable {"):library.index("    var displayMode:")]
 computed = library[library.index("    var launchArguments: String {"):library.index('    /// What a launch starts')]
-swift = "import Foundation\nstruct TouchControl: Codable {}\n" + helper + fields + computed + r'''
+swift = "import Foundation\nstruct TouchControl: Codable {}\n" + control_action + helper + fields + computed + r'''
 }
 let original = "-windowed  -dx12 -path \"Maps -dx12\""
 assert(LibraryLaunchArguments.directX11(original, enabled: false) == original)

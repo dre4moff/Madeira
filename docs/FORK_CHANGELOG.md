@@ -1,11 +1,52 @@
-# Complete fork changes — Madeira 0.1.1 / r26
+# Complete fork changes — Madeira 0.1.3 / r28
 
-This unofficial fork is based on Will Faust's official `v0.1.1`
-(`ca3183ea3dfb0fd706aff1bea2abb871b5d27aec`). Original copyright and licenses
+This unofficial fork is based on Will Faust's official `v0.1.3`
+(`4e9d45a74294cd820120791c4b3f2b79adf4fc70`). Original copyright and licenses
 are retained. Fork changes were prepared with AI assistance and are offered
 for inspection, not as an upstream endorsement or a guaranteed FPS increase.
 The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
+
+## r28 — Official Madeira 0.1.3 integration
+
+- Merge official v0.1.3 and its DXMT dependency: built-in StikJIT helper,
+  in-app pairing on iOS 27 / pairing-file import on iOS 26, automatic JIT
+  before Play, optional Madeira JIT shortcut, Steam Cloud synchronization
+  with conflict choices and replacement backups, controller keyboard/mouse
+  mappings and per-game DirectInput choice.
+- Recompile the native .NET process, anonymous guest RWX heap / V8 holdback
+  allocator and wineserver readiness changes. Include the upstream D3D12
+  ResolveSubresource correction and escaped Steam metadata strings.
+- Retain every fork feature below, the real microphone path and both r27
+  fixes. FEX's source pin and both Windows engine DLLs remain original.
+- Rebuild DXMT/D3D12 with the merged fork sources. Pin all embedded command
+  and no-output fragment shaders to Metal 3.1; correct the ARM64EC cross-file
+  toolchain path after DXMT moved to the repository root. Native command-only
+  rebuilding preserves the shader converter cache identity.
+- Physical keyboard/mouse mode suspends the fork's early physical XInput
+  reservation; touch input remains available. Changed bindings release all
+  previous keys before resampling; unchanged bindings do not interrupt a hold.
+- Optimized Release, build 12, with a Release JIT extension and separate
+  matching dSYMs. See [r28 integration evidence](R28_UPSTREAM_013.md).
+  Device gameplay, JIT pairing, Steam Cloud account access and FPS still need
+  device acceptance; host builds and tests do not establish those outcomes.
+
+## r27 — Worker context and Dock fullscreen presentation
+
+- Reuse dead Mach-thread registry slots safely instead of exhausting the
+  fixed registry after cumulative worker starts. Signal readers use coherent
+  snapshots; missing threads never borrow another thread's TEB.
+- Recover only the exact observed Mono callback return sequence when the
+  owning TEB, CPUArea, callback flag and frame validate. Retry the original
+  store with its owning registers; no FEX code or guest code is patched.
+- Remove destructive anonymous replacement of unknown occupied mappings and
+  correct the reclaim diagnostic; successful mprotect does not zero memory.
+- Present a recognized Dock game's client CAMetalLayer over a black fullscreen
+  backdrop, preserving guest geometry and inverse cursor/touch mapping.
+  Keep the game-window census active throughout the session.
+- 33 host suites passed before the upstream merge, including production
+  thread-registry and fullscreen-layer replays under ASan/UBSan.
+  See [r27 diagnosis](R27_WORKER_CONTEXT_FULLSCREEN.md).
 
 ## r26 — YAPYAP voice-worker native stack allocation
 

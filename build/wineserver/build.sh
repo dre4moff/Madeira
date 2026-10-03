@@ -4,6 +4,7 @@ set -e
 BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$BUILD_DIR/../.." && pwd)"
 WINE_SRC="$REPO_ROOT/wine"
+WINE_BUILD="${MADEIRA_WINE_CONFIG_DIR:-$WINE_SRC/build-macos}"
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 APP_LIB="$REPO_ROOT/app/Madeira/libwineserver.a"
 SHIMS_DIR="$REPO_ROOT/build/ntdll-unix/shims"
@@ -25,7 +26,7 @@ fi
 CC_FLAGS=(
     -arch arm64 -isysroot "$SDK" -miphoneos-version-min=17.0 -O2
     -I"$WINE_SRC/include" -I"$WINE_SRC/include/wine"
-    -I"$WINE_SRC/build-macos/include"
+    -I"$WINE_BUILD/include"
     -I"$BUILD_DIR" -I"$WINE_SRC/server"
     -I"$SHIMS_DIR"
     -I"$BUILD_DIR/../madsync" -DHAVE_LINUX_NTSYNC_H=1
@@ -60,14 +61,21 @@ compile_one() {
 
 # Low-impact log-policy rebuild: use the ACTUAL shipped archive as base.
 # A full replacement sweep can otherwise insert stale unrelated objects.
-if [ "${1:-all}" = "diagnostics" ] || [ "${1:-all}" = "timezone" ]; then
+if [ "${1:-all}" = "diagnostics" ] || [ "${1:-all}" = "timezone" ] || [ "${1:-all}" = "startup" ]; then
     cp "$APP_LIB" "$OBJ_DIR/libwineserver.a"
-    PARTIAL_OBJECTS=(fd_ios)
+    PARTIAL_OBJECTS=()
     if [ "$1" = "diagnostics" ]; then
         compile_one "$BUILD_DIR/request_ios.c" request_ios
         PARTIAL_OBJECTS+=(request_ios)
     fi
-    compile_one "$BUILD_DIR/fd_ios.c" fd_ios
+    if [ "$1" = "startup" ]; then
+        compile_one "$BUILD_DIR/main_ios.c" main_ios
+        compile_one "$BUILD_DIR/request_ios.c" request_ios
+        PARTIAL_OBJECTS+=(main_ios request_ios)
+    else
+        compile_one "$BUILD_DIR/fd_ios.c" fd_ios
+        PARTIAL_OBJECTS+=(fd_ios)
+    fi
     OBJCOPY="$REPO_ROOT/toolchains/llvm-host-build/bin/llvm-objcopy"
     [ -x "$OBJCOPY" ] || OBJCOPY="$REPO_ROOT/toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin/llvm-objcopy"
     for obj in "${PARTIAL_OBJECTS[@]}"; do

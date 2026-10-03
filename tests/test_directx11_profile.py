@@ -23,15 +23,16 @@ game.forceDirectX11 = true
 assert(game.launchArguments == "-dx11" && other.launchArguments == "")
 game.arguments = "-windowed -dx12"
 assert(game.launchArguments == "-windowed -dx11")
+game.arguments = "-noaudio"
 game.steamAppID = 3949040
 game.steamStart = "game"
 game.steamProgramArguments = "-windowed -d3d12"
-assert(game.startsSteamGameDirectly && game.launchArguments == "-windowed -dx11")
+assert(game.startsSteamGameDirectly && game.launchArguments == "-windowed -noaudio -dx11")
 let encoder = JSONEncoder(), decoder = JSONDecoder()
 let restored = try decoder.decode([LibraryEntry].self, from: encoder.encode([game, other]))
 assert(restored[0].forceDirectX11 == true && restored[1].forceDirectX11 == nil)
 game.forceDirectX11 = false
-assert(game.launchArguments == "-windowed -d3d12")
+assert(game.launchArguments == "-windowed -d3d12 -noaudio")
 game.forceDirectX11 = true
 game.desktop = true
 assert(!game.launchArguments.contains("-dx11"))
@@ -40,7 +41,7 @@ print("PASS: per-game DX11 arguments, saved profiles, direct/Steam direct starts
 
 dock = (root / "madeira-dock/src/launch.c").read_text()
 wide_flag = dock[dock.index("static bool wide_flag("):dock.index("/* Returns 0 once")]
-choice = re.search(r'    const char \*user_args = .+;', dock).group(0)
+choice = "    char user_args[4096]; assert(read_user_args(user_args, sizeof(user_args)));"
 calls = re.findall(r"^\s*(?:uint64_t )?call = (\(\(launch_fn\).+);", dock, re.M)
 assert len(calls) == 2, "Initial launch and retry must both forward the selected arguments"
 bridge = (root / "app/Madeira/WineProcessBridge.m").read_text()
@@ -48,11 +49,11 @@ capture_start = bridge.index('        const char *directX11Choice')
 capture_end = bridge.index('        /* Perf:', capture_start)
 capture = bridge[capture_start:capture_end]
 export_start = bridge.index('        if (forceDirectX11) setenv')
-export_end = bridge.index('        dprintf', export_start)
+export_end = bridge.index('        wine_refresh_timezone();', export_start)
 export = bridge[export_start:export_end]
 assert export_start > bridge.index("madeira.cfg env:")
 assert 'setenv("MADEIRA_GAME_DIRECTX11", forceDirectX11 == true && desktop != true ? "1" : "0", 1)' in library
-assert 'o->event("launch-directx11", user_args[0] != 0)' in dock
+assert 'o->event("launch-directx11", wide_flag(' in dock
 assert '"launch-directx11"' in (root / "app/Madeira/MadeiraDock.swift").read_text()
 c = r'''
 #include <assert.h>
@@ -68,12 +69,20 @@ typedef int BOOL;
 #define __thiscall
 static const wchar_t *setting;
 static DWORD GetEnvironmentVariableW(const wchar_t *name, wchar_t *dest, DWORD cap) {
+    if (!wcscmp(name, L"MADEIRA_STEAM_HOST_LAUNCH_ARGUMENTS")) return 0;
     assert(!wcscmp(name, L"MADEIRA_STEAM_HOST_DIRECTX11"));
     if (!setting) return 0;
     size_t n = wcslen(setting);
     if (n >= cap) return (DWORD)n + 1;
     wcscpy(dest, setting);
     return (DWORD)n;
+}
+#define CP_UTF8 65001
+#define WC_ERR_INVALID_CHARS 128
+static int WideCharToMultiByte(unsigned cp, unsigned flags, const wchar_t *in, int n,
+    char *out, int cap, void *a, void *b) {
+    (void)cp; (void)flags; (void)in; (void)n; (void)out; (void)cap; (void)a; (void)b;
+    return 0;
 }
 ''' + wide_flag + r'''
 typedef uint64_t (*launch_fn)(void *, const uint64_t *, uint32_t, int32_t, const char *);
@@ -102,6 +111,7 @@ static void transfer(const char *flag) {
     // A global config/stale previous game must not retain the enabled choice.
     setenv("MADEIRA_STEAM_HOST_DIRECTX11", "1", 1);
 ''' + capture + export + r'''
+    assert(!gameArgumentsOverflow);
     assert(!getenv("MADEIRA_GAME_DIRECTX11"));
     if (flag && !strcmp(flag, "1"))
         assert(!strcmp(getenv("MADEIRA_STEAM_HOST_DIRECTX11"), "1"));
@@ -127,4 +137,3 @@ with tempfile.TemporaryDirectory(prefix="madeira-dx11-test-") as tmp:
     subprocess.run(["clang", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined",
                     str(tmp / "main.c"), "-o", str(tmp / "test")], check=True)
     subprocess.run([str(tmp / "test")], check=True)
-

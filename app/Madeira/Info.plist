@@ -55,7 +55,7 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>MadeiraBuild</key>
-	<string>0.1.1 r22-audio-com / MMDevice worker initialization fix / D3D12 mesh depth fix / VC Runtime + DX11 + MetalFX + controller fixes / official FEX Windows engine / optimized Release</string>
+	<string>0.1.1 r23-launch-clock / per-game custom arguments + consistent Windows timezone / MMDevice worker initialization fix / D3D12 mesh depth fix / VC Runtime + DX11 + MetalFX + controller fixes / official FEX Windows engine / optimized Release</string>
 	<key>MadeiraProfileBuild</key>
 	<false/>
 </dict>

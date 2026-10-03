@@ -433,8 +433,8 @@ enum MadeiraDock {
     /// Wine's explorer opens a virtual desktop and starts the host in it. With
     /// `installers` (DockInstallers.script), cmd.exe first runs the game's one-time
     /// installs in the same session, then the host. No token is quoted: MADEIRA_ARGS is
-    /// split at spaces and passed on as is, so quote characters would reach Wine
-    /// literally, and none of these paths contains a space.
+    /// decoded using Windows quoting before Wine builds the explorer command line.
+    /// The child game receives its own custom arguments through LaunchApp.
     static func launchArguments(width: Int, height: Int, installers: String? = nil) -> String {
         guard let installers else { return "/desktop=madeira,\(width)x\(height) \(executable)" }
         return "/desktop=madeira,\(width)x\(height) C:\\windows\\system32\\cmd.exe /c call \(installers) & \(executable)"

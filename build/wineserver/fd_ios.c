@@ -23,6 +23,7 @@
 #include "../ntdll-unix/runtime_profiling.h"
 #include "poll_fd_cache.h"
 #include "request_wake_gate.h"
+#include "timezone_bias.h"
 #include <os/log.h>
 #include <mach/mach_time.h>
 #include <mach/mach_init.h>
@@ -601,10 +602,13 @@ void set_current_time(void)
          * and that is not something the four public APIs can prove either way.
          * These are three more plain atomic stores.
          *
-         * TimeZoneBias is deliberately NOT published: computing it needs
-         * gmtime/localtime/mktime, which take libc's timezone lock and share a
-         * static buffer in a process where wineserver and every guest thread
-         * share libc. It keeps its initialization value (UTC). */
+         * The timezone is refreshed outside this loop. Publish the cached
+         * actual bias too: GetLocalTime and GetTimeZoneInformation must agree.
+         * No timezone lock, logging, allocation or file I/O on this path. */
+        timeout_t bias = madeira_cached_timezone_bias();
+        atomic_store_long(&user_shared_data->TimeZoneBias.High2Time, bias >> 32);
+        atomic_store_ulong(&user_shared_data->TimeZoneBias.LowPart, bias);
+        atomic_store_long(&user_shared_data->TimeZoneBias.High1Time, bias >> 32);
         atomic_store_long(&user_shared_data->SystemTime.High2Time, current_time >> 32);
         atomic_store_ulong(&user_shared_data->SystemTime.LowPart, current_time);
         atomic_store_long(&user_shared_data->SystemTime.High1Time, current_time >> 32);

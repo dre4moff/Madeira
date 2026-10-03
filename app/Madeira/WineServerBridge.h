@@ -10,6 +10,9 @@ extern "C" {
 // Returns 0 on success, -1 on failure.
 int wineserver_start(const char *prefix_path);
 
+// Refresh the host timezone snapshot outside the wineserver event loop.
+void wine_refresh_timezone(void);
+
 // Check if wineserver is running
 int wineserver_is_running(void);
 

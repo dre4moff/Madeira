@@ -1,4 +1,4 @@
-# Complete fork changes — Madeira 0.1.1 / r22
+# Complete fork changes — Madeira 0.1.1 / r23
 
 This unofficial fork is based on Will Faust's official `v0.1.1`
 (`ca3183ea3dfb0fd706aff1bea2abb871b5d27aec`). Original copyright and licenses
@@ -6,6 +6,28 @@ are retained. Fork changes were prepared with AI assistance and are offered
 for inspection, not as an upstream endorsement or a guaranteed FPS increase.
 The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
+
+## r23 launch and clock consistency
+
+- Add **Custom Launch Arguments** to each game's card using the existing saved
+  `arguments` field. Direct games, direct Steam starts and Steam/Dock launches
+  receive the user arguments; direct Steam starts also keep their default
+  program arguments. **Force DirectX 11** remains independent and removes
+  conflicting standalone renderer flags when enabled. Quoted values are kept.
+- Replace the direct-start space splitter with bounded Windows quoting decode.
+  Steam/Dock forwards the complete UTF-8 value to the real game's LaunchApp
+  call, including its retry. Empty choices reset across games. No shell
+  expansion or raw argument logging is added.
+- Correct an iOS Wine clock inconsistency: the shared page kept timezone bias
+  at UTC zero while the timezone API used the host's local zone. Publish the
+  cached actual offset (including DST) with the standard three-store sequence.
+  Refresh outside the server loop at startup/launch and on timezone/significant
+  time changes. System UTC, monotonic clocks and device settings are untouched.
+- The tester reports that the preceding audio fix allows the affected game to
+  start and run. The new timezone correction addresses a proven API mismatch;
+  its effect on the empty matchmaking list remains unverified on the phone.
+- No new FEX, graphics, controller, shader-cache or performance-policy changes.
+  No new FPS increase is claimed. See [r23 details](R23_LAUNCH_CLOCK.md).
 
 ## Compatibility and controls
 

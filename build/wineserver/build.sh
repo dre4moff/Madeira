@@ -60,19 +60,25 @@ compile_one() {
 
 # Low-impact log-policy rebuild: use the ACTUAL shipped archive as base.
 # A full replacement sweep can otherwise insert stale unrelated objects.
-if [ "${1:-all}" = "diagnostics" ]; then
+if [ "${1:-all}" = "diagnostics" ] || [ "${1:-all}" = "timezone" ]; then
     cp "$APP_LIB" "$OBJ_DIR/libwineserver.a"
-    compile_one "$BUILD_DIR/request_ios.c" request_ios
+    PARTIAL_OBJECTS=(fd_ios)
+    if [ "$1" = "diagnostics" ]; then
+        compile_one "$BUILD_DIR/request_ios.c" request_ios
+        PARTIAL_OBJECTS+=(request_ios)
+    fi
     compile_one "$BUILD_DIR/fd_ios.c" fd_ios
     OBJCOPY="$REPO_ROOT/toolchains/llvm-host-build/bin/llvm-objcopy"
     [ -x "$OBJCOPY" ] || OBJCOPY="$REPO_ROOT/toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin/llvm-objcopy"
-    for obj in request_ios fd_ios; do
+    for obj in "${PARTIAL_OBJECTS[@]}"; do
         for symbol in alloc_user_handle free_user_handle get_virtual_screen_rect destroy_thread_windows get_window_thread is_desktop_class is_message_class is_window_visible mirror_region send_notify_message shared_session user_shared_data; do
             "$OBJCOPY" --redefine-sym "_${symbol}=_ws_${symbol}" "$OBJ_DIR/$obj.o"
         done
     done
-    xcrun ar d "$OBJ_DIR/libwineserver.a" request.o fd.o request_ios.o fd_ios.o 2>/dev/null || true
-    xcrun ar r "$OBJ_DIR/libwineserver.a" "$OBJ_DIR/request_ios.o" "$OBJ_DIR/fd_ios.o"
+    for obj in "${PARTIAL_OBJECTS[@]}"; do
+        xcrun ar d "$OBJ_DIR/libwineserver.a" "${obj%_ios}.o" "$obj.o" 2>/dev/null || true
+        xcrun ar r "$OBJ_DIR/libwineserver.a" "$OBJ_DIR/$obj.o"
+    done
     xcrun ranlib "$OBJ_DIR/libwineserver.a"
     cp "$OBJ_DIR/libwineserver.a" "$APP_LIB"
     exit 0

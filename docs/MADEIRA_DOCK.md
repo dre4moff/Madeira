@@ -1,5 +1,24 @@
 # Madeira Dock
 
+## Per-game custom launch arguments (r23)
+
+The parent app publishes the selected game's complete command line in
+`MADEIRA_STEAM_HOST_LAUNCH_ARGUMENTS`, after global config is applied. Dock
+converts the bounded UTF-16 environment value to UTF-8 and passes it intact as
+`LaunchApp` user arguments on both the first attempt and the configuration
+retry. These arguments belong to the actual game, not the host executable.
+The app validates balanced Windows double quotes, no NUL/line breaks, at most
+64 tokens and fewer than 4096 UTF-8 bytes. Dock rejects oversized or invalid
+conversion rather than silently truncating. It reports only argument byte
+count, never their contents. Absent/empty values retain the older independent
+`MADEIRA_STEAM_HOST_DIRECTX11` fallback. The parent clears/replaces the value
+on every profile, including desktop, to prevent stale cross-game arguments.
+
+Steam authentication, entitlement, original launch options, CEG checks and
+callback policy remain unchanged. Parent host-only tests exercise the actual
+reader and both LaunchApp call sites; no new live-client acceptance is claimed.
+
+
 ## Local r14 sign-in recovery
 
 The local r14 update repairs recycled socket-family poll entries and adds bounded

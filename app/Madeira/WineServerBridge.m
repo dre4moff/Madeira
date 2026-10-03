@@ -2,6 +2,7 @@
 // This bridges the wineserver (compiled as a static library) into the iOS app.
 
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import <os/log.h>
 #import <sys/stat.h>
 #import <pthread.h>
@@ -9,6 +10,27 @@
 
 #include "WineServerBridge.h"
 #include <sys/time.h>
+#include "../../build/wineserver/timezone_bias.h"
+
+int64_t madeira_timezone_bias_ticks = 0;
+
+void wine_refresh_timezone(void) {
+    tzset();
+    madeira_update_timezone_bias();
+}
+
+static void wine_observe_timezone(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        for (NSNotificationName name in @[NSSystemTimeZoneDidChangeNotification,
+                                          UIApplicationSignificantTimeChangeNotification]) {
+            [[NSNotificationCenter defaultCenter] addObserverForName:name object:nil
+                queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *notification) {
+                    wine_refresh_timezone();
+                }];
+        }
+    });
+}
 
 static FILE *g_ws_bridge_log = NULL;
 static pthread_mutex_t g_ws_bridge_log_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -134,6 +156,11 @@ int wineserver_start(const char *prefix_path) {
         wine_log_msg("Wineserver already running");
         return 0;
     }
+
+    wine_refresh_timezone();
+    wine_observe_timezone();
+    wine_log_msg("[clock-consistency] utc-bias-seconds=%lld",
+                 (long long)(madeira_cached_timezone_bias() / INT64_C(10000000)));
 
     // Store prefix path
     if (g_prefix_path) free(g_prefix_path);

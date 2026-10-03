@@ -149,22 +149,51 @@ enum FrontendChoice {
 /// older files keep decoding; unknown keys are ignored.
 /// Render API arguments are per game; quoted values remain intact.
 enum LibraryLaunchArguments {
-    static func directX11(_ arguments: String, enabled: Bool) -> String {
-        guard enabled else { return arguments }
-        var tokens: [String] = [], token = ""
-        var quoted = false
-        for character in arguments {
-            if character == "\"" { quoted.toggle() }
-            if character.isWhitespace && !quoted {
-                if !token.isEmpty { tokens.append(token); token = "" }
-            } else { token.append(character) }
+    /// Windows quoting, retaining each token's original spelling for Steam.
+    static func tokens(_ arguments: String) -> [(raw: String, value: String)]? {
+        let input = Array(arguments.utf8)
+        var result: [(raw: String, value: String)] = [], p = 0
+        while p < input.count {
+            while p < input.count && (input[p] == 32 || input[p] == 9) { p += 1 }
+            if p == input.count { break }
+            let start = p
+            var quoted = false, value: [UInt8] = []
+            while p < input.count && (quoted || (input[p] != 32 && input[p] != 9)) {
+                var slashes = 0
+                while p < input.count && input[p] == 92 { slashes += 1; p += 1 }
+                if p < input.count && input[p] == 34 {
+                    value += Array(repeating: UInt8(92), count: slashes / 2)
+                    if slashes % 2 == 1 { value.append(34) }
+                    else if quoted && p + 1 < input.count && input[p + 1] == 34 { value.append(34); p += 1 }
+                    else { quoted.toggle() }
+                    p += 1
+                } else {
+                    value += Array(repeating: UInt8(92), count: slashes)
+                    if p == input.count || (!quoted && (input[p] == 32 || input[p] == 9)) { break }
+                    if input[p] == 0 || input[p] == 10 || input[p] == 13 { return nil }
+                    value.append(input[p]); p += 1
+                }
+            }
+            if quoted { return nil }
+            result.append((String(decoding: input[start..<p], as: UTF8.self), String(decoding: value, as: UTF8.self)))
         }
-        if !token.isEmpty { tokens.append(token) }
-        let renderFlags: Set<String> = ["-dx11", "-d3d11", "-dx12", "-d3d12", "-vulkan", "-opengl", "-opengl3", "-opengl4"]
-        tokens.removeAll { renderFlags.contains($0.lowercased()) }
-        tokens.append("-dx11")
-        return tokens.joined(separator: " ")
+        return result
     }
+
+    static func combining(_ base: String, custom: String) -> String {
+        if base.isEmpty { return custom }
+        if custom.isEmpty { return base }
+        return base + " " + custom
+    }
+
+    static func directX11(_ arguments: String, enabled: Bool) -> String {
+        guard enabled, let parsed = tokens(arguments) else { return arguments }
+        let renderFlags: Set<String> = ["-dx11", "-d3d11", "-dx12", "-d3d12", "-vulkan", "-opengl", "-opengl3", "-opengl4"]
+        var kept = parsed.filter { !renderFlags.contains($0.value.lowercased()) }.map(\.raw)
+        kept.append("-dx11")
+        return kept.joined(separator: " ")
+    }
+
 }
 
 /// Legacy spatial profiles remain decodable. They no longer shrink the monitor:
@@ -272,7 +301,8 @@ struct LibraryEntry: Codable, Identifiable {
 
     var launchArguments: String {
         if desktop == true { return "/desktop=shell,\(resolution) C:\\windows\\system32\\services.exe" }
-        let base = startsSteamGameDirectly ? (steamProgramArguments ?? "") : arguments
+        let base = startsSteamGameDirectly
+            ? LibraryLaunchArguments.combining(steamProgramArguments ?? "", custom: arguments) : arguments
         return LibraryLaunchArguments.directX11(base, enabled: forceDirectX11 == true)
     }
 
@@ -312,15 +342,10 @@ struct LibraryEntry: Codable, Identifiable {
               launchWindowsPath.utf8.count < 1024, (steamWorkingWindowsPath?.utf8.count ?? 0) < 512 else {
             throw LibraryError.message("The saved launch profile contains invalid display or argument values.")
         }
-        var quoted = false, inToken = false, tokens = 0
-        for character in launchArguments {
-            if character == "\"" { quoted.toggle() }
-            if !quoted && (character == " " || character == "\t") { inToken = false }
-            else if !inToken { tokens += 1; inToken = true }
-        }
-        // WineProcessBridge takes at most 64 arguments in 4 KB.
         guard launchArguments.utf8.count < 4096 else { throw LibraryError.message("The complete launch command is too long.") }
-        guard !quoted, tokens <= 64 else { throw LibraryError.message("Use balanced double quotes and at most 64 launch arguments in total.") }
+        guard let tokens = LibraryLaunchArguments.tokens(launchArguments), tokens.count <= 64 else {
+            throw LibraryError.message("Use balanced double quotes, no line breaks, and at most 64 launch arguments in total.")
+        }
     }
 
     /// Runs on the launch worker, before the JIT pool is taken.
@@ -337,6 +362,7 @@ struct LibraryEntry: Codable, Identifiable {
         // guest environment. Always set it, so another game's choice cannot leak.
         setenv("MADEIRA_GAME_NATIVE_VCRUNTIME", nativeVCRuntime == true ? "1" : "0", 1)
         setenv("MADEIRA_GAME_DIRECTX11", forceDirectX11 == true && desktop != true ? "1" : "0", 1)
+        setenv("MADEIRA_GAME_LAUNCH_ARGUMENTS", desktop == true ? "" : launchArguments, 1)
         // Unset unless chosen: FEX's own default then applies, as for any other launch.
         if reducedX87 { setenv("FEX_X87REDUCEDPRECISION", "1", 1) } else { unsetenv("FEX_X87REDUCEDPRECISION") }
         // Exported only when chosen: unset keeps the engine's own default (and any
@@ -2427,8 +2453,10 @@ struct LibraryDetail: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     // A Steam game starts with Steam's own launch option through Madeira Dock.
-                    if entry.desktop != true && entry.steamAppID == nil {
-                        TextField("Launch arguments", text: $entry.arguments, axis: .vertical).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    if entry.desktop != true {
+                        TextField("Custom Launch Arguments", text: $entry.arguments, axis: .vertical).autocorrectionDisabled().textInputAutocapitalization(.never)
+                        Text("Additional arguments for this game's executable at the next launch, including Steam/Dock. For example: -noaudio or -windowed. Use double quotes for values containing spaces. Force DirectX 11 remains a separate option and takes precedence over conflicting renderer flags.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 } header: { Text("Compatibility & performance") } footer: {
                     Text("Reduced-precision x87 can make older games faster at some cost in accuracy; it is off by default. With Fastsync, fast synchronization (on by default) handles events without a server round trip, and fast semaphore waits (off by default) does the same for semaphores. Settings apply to the next launch; a precision change may still require restarting Madeira.")

@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <dirent.h>
 #include "../../build/graphics_profile.h"
+#include "../../build/launch_arguments.h"
 #include "../../build/madeira_cfg.h"   /* ml1095: one config file */
 #include "../../build/vcruntime_overrides.h"
 #include "../../build/ntdll-unix/runtime_profiling.h"
@@ -796,6 +797,11 @@ static void *wine_process_thread(void *arg) {
         const char *directX11Choice = getenv("MADEIRA_GAME_DIRECTX11");
         const BOOL forceDirectX11 = directX11Choice && *directX11Choice == '1';
         unsetenv("MADEIRA_GAME_DIRECTX11");
+        char selectedGameArguments[4096] = {0};
+        const char *gameArgumentsChoice = getenv("MADEIRA_GAME_LAUNCH_ARGUMENTS");
+        const BOOL gameArgumentsOverflow = gameArgumentsChoice && strlen(gameArgumentsChoice) >= sizeof(selectedGameArguments);
+        if (gameArgumentsChoice && !gameArgumentsOverflow) memcpy(selectedGameArguments, gameArgumentsChoice, strlen(gameArgumentsChoice) + 1);
+        unsetenv("MADEIRA_GAME_LAUNCH_ARGUMENTS");
         /* Perf: the guest main thread runs ON this pthread. Promote to
          * USER_INTERACTIVE so it schedules on P-cores with minimal kernel
          * timer coalescing (same rationale as start_thread in
@@ -1179,6 +1185,8 @@ static void *wine_process_thread(void *arg) {
         // line. Clear it for every other profile to prevent cross-game leaks.
         if (forceDirectX11) setenv("MADEIRA_STEAM_HOST_DIRECTX11", "1", 1);
         else unsetenv("MADEIRA_STEAM_HOST_DIRECTX11");
+        setenv("MADEIRA_STEAM_HOST_LAUNCH_ARGUMENTS", selectedGameArguments, 1);
+        wine_refresh_timezone();
         dprintf(STDERR_FILENO, "[graphics-profile] DirectX 11 request=%d (Steam user args: %s)\n",
                 forceDirectX11, forceDirectX11 ? "-dx11" : "default");
         if (nativeVCRuntime)
@@ -1458,33 +1466,31 @@ static void *wine_process_thread(void *arg) {
             snprintf(exe_path, sizeof(exe_path), "C:\\windows\\system32\\%s", madeira_exe);
         }
 
-        // Optional MADEIRA_ARGS env var: space-separated args appended to argv.
-        // Tokenized in-place; max 16 extra tokens.
-        static char args_buf[1024];
-        char *extra_argv[16] = {0};
-        int extra_argc = 0;
+        // Decode Windows quotes before Wine re-encodes argv for the program.
+        static char args_buf[4096];
+        char *extra_argv[64] = {0};
         const char *madeira_args = getenv("MADEIRA_ARGS");
-        if (madeira_args && *madeira_args) {
-            strncpy(args_buf, madeira_args, sizeof(args_buf) - 1);
-            args_buf[sizeof(args_buf) - 1] = 0;
-            char *saveptr = NULL;
-            for (char *tok = strtok_r(args_buf, " ", &saveptr);
-                 tok && extra_argc < 16;
-                 tok = strtok_r(NULL, " ", &saveptr)) {
-                extra_argv[extra_argc++] = tok;
-            }
+        int extra_argc = madeira_parse_launch_arguments(madeira_args, args_buf,
+                sizeof(args_buf), extra_argv, 64);
+        if (extra_argc < 0 || gameArgumentsOverflow) {
+            dprintf(STDERR_FILENO, "[launch-arguments] rejected malformed or oversized command\n");
+            // The owned client fd has not reached Wine. Close it and stop the
+            // server instead of leaving an idle session or leaked socket.
+            close((int)(intptr_t)arg);
+            unsetenv("WINESERVERSOCKET");
+            wineserver_stop();
+            g_wine_running = 0;
+            return NULL;
         }
-
-        char *argv[24];
+        char *argv[67];
         int argc = 0;
         argv[argc++] = "wine";
         argv[argc++] = exe_path;
         for (int i = 0; i < extra_argc; i++) argv[argc++] = extra_argv[i];
         argv[argc] = NULL;
         dprintf(STDERR_FILENO, "[WineProc] argv[1] = %s\n", exe_path);
-        for (int i = 0; i < extra_argc; i++) {
-            dprintf(STDERR_FILENO, "[WineProc] argv[%d] = %s\n", 2 + i, extra_argv[i]);
-        }
+        dprintf(STDERR_FILENO, "[launch-arguments] count=%d bytes=%zu\n",
+                extra_argc, madeira_args ? strlen(madeira_args) : 0);
 
         /* iOS-Madeira: chdir to the unix path that maps to the exe's Wine
          * directory BEFORE __wine_main. Wine inherits the iOS app sandbox
@@ -1636,7 +1642,7 @@ int wine_process_start(const char *prefix_path) {
     struct sched_param sched = { .sched_priority = 20 };  // lower than default (31)
     pthread_attr_setschedparam(&attr, &sched);
 
-    int ret = pthread_create(&g_wine_thread, &attr, wine_process_thread, NULL);
+    int ret = pthread_create(&g_wine_thread, &attr, wine_process_thread, (void *)(intptr_t)pair[1]);
     pthread_attr_destroy(&attr);
     if (ret != 0) {
         LOG("Failed to create Wine process thread: %d", ret);

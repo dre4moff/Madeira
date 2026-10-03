@@ -1162,6 +1162,12 @@ static void *wine_process_thread(void *arg) {
             }
         }
 
+        // Enable the narrowly scoped MMDeviceEnumerator worker compatibility
+        // policy. A madeira.cfg env override of 0 preserves standard COM rules.
+        setenv("MADEIRA_MMDEVICE_IMPLICIT_MTA", "1", 0);
+        dprintf(STDERR_FILENO, "[audio-com-policy] MMDevice implicit MTA=%s\n",
+                getenv("MADEIRA_MMDEVICE_IMPLICIT_MTA") ?: "0");
+
         // Session-only Wine load order, inherited by Steam/Dock's children.
         // Applying after global config preserves other DLL overrides while the
         // game's switch takes precedence for these five libraries only.

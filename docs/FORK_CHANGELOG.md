@@ -1,4 +1,4 @@
-# Complete fork changes — Madeira 0.1.1 / r21
+# Complete fork changes — Madeira 0.1.1 / r22
 
 This unofficial fork is based on Will Faust's official `v0.1.1`
 (`ca3183ea3dfb0fd706aff1bea2abb871b5d27aec`). Original copyright and licenses
@@ -9,6 +9,14 @@ FEX performance/diagnostic gate was removed before this release.
 
 ## Compatibility and controls
 
+- **r22 audio device discovery compatibility:** the supplied r21 log and
+  read-only executable inspection identify a failed MMDeviceEnumerator creation
+  on the game's uninitialized asset worker, followed by a null dereference.
+  A narrowly enabled implicit-MTA TLS cookie allows the real audio class factory
+  to run; existing apartments and unrelated classes keep their behavior. Thread
+  teardown releases the cookie. No FEX/graphics/audio backend change; microphone
+  capture remains unsupported. Synthetic tests pass; full game startup remains
+  unverified. See [r22 evidence and limits](R22_AUDIO_COM.md).
 - **r21 PS-less mesh pipeline correction:** provide a precompiled no-output
   fragment when a geometry/tessellation pipeline has no game pixel shader.
   Preserve depth/stencil rasterization and prevent Metal's fatal nil-fragment

@@ -1,4 +1,4 @@
-# Complete fork changes — Madeira 0.1.1 / r25
+# Complete fork changes — Madeira 0.1.1 / r26
 
 This unofficial fork is based on Will Faust's official `v0.1.1`
 (`ca3183ea3dfb0fd706aff1bea2abb871b5d27aec`). Original copyright and licenses
@@ -6,6 +6,22 @@ are retained. Fork changes were prepared with AI assistance and are offered
 for inspection, not as an upstream endorsement or a guaranteed FPS increase.
 The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
+
+## r26 — YAPYAP voice-worker native stack allocation
+
+- Preserve the iOS native address floor at 64-bit process boot. The old desktop
+  reset made a kernel/emulator stack's 4 GiB lower bound disable the existing
+  advisory allocation fallback; YAPYAP's voice initialization then failed a
+  1 MiB stack request and terminated through `libvosk`/`std::system_error`.
+- Keep real microphone capture and voice recognition available. No `-noaudio`,
+  thread-count cap, larger stack reservation or FEX change is introduced.
+- Retain caller low/high constraints, WoW windows and all unrelated r25 engine
+  objects and resources. Only native `virtual.o` changes; only Madeira and
+  Info.plist differ in the IPA. Partial rebuilds can select this VM object.
+- Optimized Release, build 10; 31 synthetic suites pass, including production
+  allocator/stack replay showing the r25 failure and 160-worker recovery with
+  ASan/UBSan. Successful phone startup/spoken spell recognition, FPS and online
+  matchmaking remain unverified. See [r26 diagnosis](R26_VOICE_THREAD_STACKS.md).
 
 ## r25 — Native JIT placement, responsive settings and real microphone
 

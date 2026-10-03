@@ -1,13 +1,13 @@
 # Fork release and personal runtime setup
 
-Release: `v0.1.1-fork-r25`, based on official Madeira `v0.1.1`. This is an
+Release: `v0.1.1-fork-r26`, based on official Madeira `v0.1.1`. This is an
 unofficial, experimental prerelease. The app is optimized Release (`-O2` native,
-`-O` whole-module Swift), build 9, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
+`-O` whole-module Swift), build 10, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
 The public IPA is unsigned; it needs personal signing/sideloading and JIT.
 
 ## Install
 
-1. Download `Madeira-0.1.1-Fork-r25-Release-unsigned.ipa` from
+1. Download `Madeira-0.1.1-Fork-r26-Release-unsigned.ipa` from
    [this fork's releases](https://github.com/dre4moff/Madeira/releases).
 2. For games needing Microsoft native VC++ runtime, first prepare your personal
    IPA as below. Microsoft binaries are deliberately absent from public assets.
@@ -38,9 +38,9 @@ Run on macOS with Python 3:
 
 ```sh
 python3 tools/prepare-vcruntime-ipa.py \
-  --ipa /path/to/Madeira-0.1.1-Fork-r25-Release-unsigned.ipa \
+  --ipa /path/to/Madeira-0.1.1-Fork-r26-Release-unsigned.ipa \
   --runtime-dir /path/to/your/unmodified-x64-runtime \
-  --output /path/to/Madeira-r25-personal-unsigned.ipa
+  --output /path/to/Madeira-r26-personal-unsigned.ipa
 ```
 
 The helper checks x64 PE headers and intact certificate ranges, preserves DLL
@@ -52,7 +52,7 @@ runtime card switch. These personal files are not public release assets.
 ## Source and rebuilding
 
 ```sh
-git clone --recurse-submodules --branch v0.1.1-fork-r25 \
+git clone --recurse-submodules --branch v0.1.1-fork-r26 \
   https://github.com/dre4moff/Madeira.git
 ```
 
@@ -83,7 +83,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -destination 'generic/platform=iOS' -derivedDataPath .build/release \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO ENABLE_DEBUG_DYLIB=NO \
   GCC_OPTIMIZATION_LEVEL=2 SWIFT_OPTIMIZATION_LEVEL=-O \
-  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym CURRENT_PROJECT_VERSION=7 ENABLE_TESTABILITY=NO build
+  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym CURRENT_PROJECT_VERSION=10 ENABLE_TESTABILITY=NO build
 ```
 
 The historical r17/r18/r19 packagers consume local prior artifacts/checkpoints;
@@ -99,8 +99,9 @@ The release's verification manifest contains the public asset digest, native
 UUID, unsigned Mach-O inspection, original FEX identities, resource comparison,
 optimization evidence and tests. Native and dSYM UUIDs match.
 See the current `verification.json` and `dwarfdump --uuid` output; symbols remain outside the IPA.
-r23 rebuilds the app and ARM64EC combase.dll; all other public r21 payload files
-are verified byte-identical. See [r23 diagnosis and remaining limits](R22_AUDIO_COM.md).
+r26 rebuilds only the host VM archive member and application. All public r25
+payload files except Madeira and Info.plist are byte-identical. See
+[r26 voice-worker diagnosis and validation](R26_VOICE_THREAD_STACKS.md).
 
 [Complete changes](FORK_CHANGELOG.md) distinguish observed gameplay, synthetic
 operation counts and unverified FPS/graphics outcomes. Compare the same map,
@@ -134,3 +135,11 @@ manual-time warning with Crossplay disabled; r24 already publishes the real UTC
 time, local DST bias and a valid advancing shared tick multiplier. We do not
 fake service/device time or bypass the game's online checks. See
 [R25 validation and remaining issues](R25_JIT_AUDIO.md) for reproduction details.
+
+## r26 YAPYAP startup
+
+The native stack allocation fix retains the iOS address floor during 64-bit
+process boot; it preserves the real microphone path and every r25 engine.
+31 synthetic suites pass, including a before/after production allocator replay.
+Phone acceptance must cover startup and actual spoken spell recognition; neither
+is claimed from the synthetic run. See [r26 details](R26_VOICE_THREAD_STACKS.md).

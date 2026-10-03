@@ -19306,7 +19306,19 @@ void virtual_set_large_address_space(void)
     {
         if (!wow)
         {
+#ifdef WINE_IOS
+            /* The native iOS __PAGEZERO cannot host Windows allocations.
+             * Keep the same floor as virtual_init instead of resetting it to
+             * Wine's desktop value. A kernel/emulator stack requests a 4 GB
+             * lower bound; lowering this global to 64 KB makes that harmless
+             * bound look restrictive to map_view and disables its advisory
+             * furniture-ceiling fallback. YAPYAP's voice workers then fail to
+             * create a thread even when the unclamped native range has room.
+             * WoW guest windows and explicit caller upper bounds are unchanged. */
+            address_space_start = (void *)0x100010000;
+#else
             address_space_start = (void *)0x10000;
+#endif
 #ifndef __APPLE__  /* don't free the zerofill section on macOS */
             if ((main_image_info.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA) &&
                 (main_image_info.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE))

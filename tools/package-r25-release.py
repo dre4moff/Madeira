@@ -108,7 +108,7 @@ report = {
     "uuid_arm64": uuids[0], "changed_payload_files_from_public_r23": changed,
     "unchanged_payload_files": len(after)-len(changed), "unsigned_macho_files": machos,
     "original_fex_windows_engines_preserved": True, "microsoft_runtime_redistributed": False,
-    "validation": "28 synthetic suites, including ASan/UBSan actual microphone packet/ring, early JIT constructor and D3D12 recorder, blocked-scan UI concurrency, clock/timezone/argv/controller/FEX/MetalFX regressions. Optimized Release compiled. No new iPhone microphone/gameplay/FPS acceptance claimed.",
+    "validation": "30 synthetic suites, including ASan/UBSan actual microphone packet/ring, early JIT constructor and D3D12 recorder, blocked-scan UI concurrency, clock/timezone/argv/controller/FEX/MetalFX regressions. Optimized Release compiled. No new iPhone microphone/gameplay/FPS acceptance claimed.",
     "tests": json.loads((root / ".build/r25-audit/host-tests.json").read_text()),
     "combase_optimization": "-O2, stripped ARM64EC PE",
     "audio_compatibility": "r23 COM DLL unchanged; actual iOS route endpoints and permission-gated RemoteIO WASAPI capture",

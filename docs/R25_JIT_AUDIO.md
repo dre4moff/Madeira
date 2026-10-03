@@ -41,7 +41,7 @@ Windows endpoint lists may require a game restart.
 
 ## Synthetic verification
 
-28 suites pass, including production early-constructor execution with mocked
+30 suites pass, including production early-constructor execution with mocked
 Mach VM boundaries, ASan/UBSan microphone ring/packet/format/endpoint tests,
 production D3D12 barrier recorder tests, a deliberately blocked cache scan to
 verify UI reads remain immediate and launch still waits safely, clock/timezone,

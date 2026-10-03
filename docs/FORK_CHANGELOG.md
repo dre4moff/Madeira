@@ -24,7 +24,7 @@ FEX performance/diagnostic gate was removed before this release.
   COMMON/PRESENT, writes, UAV, aliasing, split and unknown-state hazards plus
   every previously recorded fence. Config `read-barrier-elision=0` opts out.
 - Include the locally tested r24 Q24 shared-tick multiplier correction.
-- Optimized Release, build 9; 28 synthetic suites pass. FEX/source/DLLs and all
+- Optimized Release, build 9; 30 synthetic suites pass. FEX/source/DLLs and all
   unrelated native archive objects retained. No device FPS uplift or successful
   online matchmaking claimed; manual-time warning is still under investigation.
 

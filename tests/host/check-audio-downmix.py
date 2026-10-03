@@ -32,6 +32,9 @@ harness = r"""
 #include <math.h>
 typedef unsigned char BYTE; typedef uint16_t WORD; typedef uint32_t UINT32, DWORD, UInt32;
 typedef void *HANDLE;
+typedef int EDataFlow;
+#define eRender 0
+#define eCapture 1
 """ + fmt + stream + downmix + mix + r"""
 static int fails;
 #define NEAR(a, b) (fabsf((a) - (b)) < 1e-4f)
@@ -130,6 +133,10 @@ int main(int argc, char **argv)
     layout(&s, 4, 0x3);
     mix_one(&s, 32, 1, 3, 0.5f, o); expect("unnamed->L", o[0], 0.25f); expect("unnamed->R", o[1], 0.25f);
 
+    /* Captured microphone samples must never feed the speaker mixer. */
+    layout(&s, 1, 4);s.flow=eCapture;
+    mix_one(&s,32,1,0,.5f,o);expect("capture not monitored L",o[0],0);expect("capture not monitored R",o[1],0);
+    if (atomic_load(&s.play_pos)!=0) fails++;
     if (fails) return 1;
     puts("ok");
     return 0;

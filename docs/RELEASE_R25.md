@@ -16,7 +16,7 @@ Per-game Native VC++ Runtime and Force DirectX 11 switches; Custom Launch Argume
 
 ## Validation and limits
 
-28 synthetic suites passed, including ASan/UBSan tests of actual microphone ring/packet code, Mach-boundary JIT constructor and D3D12 recorder; blocked-scan UI concurrency; 513 launch-parser parity cases; clock/timezone, controller, VC runtime, MetalFX, shader cache and original FEX regressions. The IPA payload differs from public r23 in exactly four files: Madeira, Info.plist and the two identical D3D12 DLL copies. Only the audio object changes in native ntdll relative to r24; unrelated native objects are retained.
+30 synthetic suites passed, including ASan/UBSan tests of actual microphone ring/packet code, Mach-boundary JIT constructor and D3D12 recorder; blocked-scan UI concurrency; 513 launch-parser parity cases; clock/timezone, controller, VC runtime, MetalFX, shader cache and original FEX regressions. The IPA payload differs from public r23 in exactly four files: Madeira, Info.plist and the two identical D3D12 DLL copies. Only the audio object changes in native ntdll relative to r24; unrelated native objects are retained.
 
 **No measured phone FPS improvement is claimed. MECCHA CHAMELEON matchmaking remains unresolved**, including the manual-time warning with Crossplay disabled. The latest log fails before gameplay and contains no backend rejection establishing its cause. No device/server time spoofing or online-check bypass is included. See [diagnosis, audio behavior and next diagnostic capture](https://github.com/dre4moff/Madeira/blob/v0.1.1-fork-r25/docs/R25_JIT_AUDIO.md).
 

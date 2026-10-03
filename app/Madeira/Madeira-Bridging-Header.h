@@ -1,4 +1,5 @@
 #import "JITAllocator.h"
+#include "../../build/ntdll-unix/audio_route.h"
 #import "FEXBridge.h"
 #import "WineServerBridge.h"
 #import "WineProcessBridge.h"

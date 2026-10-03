@@ -25,7 +25,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<string>9</string>
 	<key>GCSupportsGameMode</key>
 	<true/>
 	<key>LSApplicationCategoryType</key>
@@ -36,6 +36,8 @@
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Madeira uses the selected microphone for voice chat and recording requested by your games.</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
@@ -55,7 +57,7 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>MadeiraBuild</key>
-	<string>0.1.1 r23-launch-clock / per-game custom arguments + consistent Windows timezone / MMDevice worker initialization fix / D3D12 mesh depth fix / VC Runtime + DX11 + MetalFX + controller fixes / official FEX Windows engine / optimized Release</string>
+	<string>0.1.1 r25-jit-audio / early native JIT reservation + real microphone capture + responsive settings + conservative read-only barriers / shared Windows clock + custom arguments + audio COM + VC Runtime + DX11 + MetalFX + controller fixes / official FEX Windows engine / optimized Release</string>
 	<key>MadeiraProfileBuild</key>
 	<false/>
 </dict>

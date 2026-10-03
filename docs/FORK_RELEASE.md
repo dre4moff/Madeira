@@ -1,13 +1,13 @@
 # Fork release and personal runtime setup
 
-Release: `v0.1.1-fork-r23`, based on official Madeira `v0.1.1`. This is an
+Release: `v0.1.1-fork-r25`, based on official Madeira `v0.1.1`. This is an
 unofficial, experimental prerelease. The app is optimized Release (`-O2` native,
-`-O` whole-module Swift), build 7, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
+`-O` whole-module Swift), build 9, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
 The public IPA is unsigned; it needs personal signing/sideloading and JIT.
 
 ## Install
 
-1. Download `Madeira-0.1.1-Fork-r23-Release-unsigned.ipa` from
+1. Download `Madeira-0.1.1-Fork-r25-Release-unsigned.ipa` from
    [this fork's releases](https://github.com/dre4moff/Madeira/releases).
 2. For games needing Microsoft native VC++ runtime, first prepare your personal
    IPA as below. Microsoft binaries are deliberately absent from public assets.
@@ -38,9 +38,9 @@ Run on macOS with Python 3:
 
 ```sh
 python3 tools/prepare-vcruntime-ipa.py \
-  --ipa /path/to/Madeira-0.1.1-Fork-r23-Release-unsigned.ipa \
+  --ipa /path/to/Madeira-0.1.1-Fork-r25-Release-unsigned.ipa \
   --runtime-dir /path/to/your/unmodified-x64-runtime \
-  --output /path/to/Madeira-r23-personal-unsigned.ipa
+  --output /path/to/Madeira-r25-personal-unsigned.ipa
 ```
 
 The helper checks x64 PE headers and intact certificate ranges, preserves DLL
@@ -52,7 +52,7 @@ runtime card switch. These personal files are not public release assets.
 ## Source and rebuilding
 
 ```sh
-git clone --recurse-submodules --branch v0.1.1-fork-r23 \
+git clone --recurse-submodules --branch v0.1.1-fork-r25 \
   https://github.com/dre4moff/Madeira.git
 ```
 
@@ -106,3 +106,31 @@ are verified byte-identical. See [r23 diagnosis and remaining limits](R22_AUDIO_
 operation counts and unverified FPS/graphics outcomes. Compare the same map,
 settings, warm cache and thermal state when testing; do not purge shader caches
 between runs. Raw phone logs, IDs, credentials and private traces are not shipped.
+
+## r25 audio and validation
+
+Before starting a game, open **Settings → Audio devices → Enable microphone
+for games**, grant iOS permission and choose an available input. The session
+menu also provides the input selector and system output route picker. Windows
+receives the real iOS port names/UIDs and captured microphone samples (mono or
+duplicated stereo, PCM16/PCM32/float32), not a fake silent capture endpoint.
+
+iOS has one current output route and one shared input route; multiple Windows
+clients cannot independently use different physical microphones. Connecting a
+new device updates the native route snapshot; a game that caches its Windows
+endpoint list may need a restart to enumerate newly connected ports. Bluetooth
+microphone use can change the output profile/quality. Microphone access is off
+by default and cannot be enabled after Wine has launched without restarting.
+No microphone recordings or audio sample dumps are written.
+
+This release addresses the observed JIT placement failure, removes a UI wait
+on cache scanning, and omits conservative D3D12 read-only transition commands.
+These are verified source/build and synthetic results, **not a measured FPS
+improvement on a phone**. FEX source and both official Windows engine DLLs
+remain unchanged.
+
+**MECCHA CHAMELEON matchmaking remains unresolved.** The user reports the same
+manual-time warning with Crossplay disabled; r24 already publishes the real UTC
+time, local DST bias and a valid advancing shared tick multiplier. We do not
+fake service/device time or bypass the game's online checks. See
+[R25 validation and remaining issues](R25_JIT_AUDIO.md) for reproduction details.

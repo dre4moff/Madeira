@@ -1,6 +1,7 @@
 #include "JITAllocator.h"
 
 #include <mach/mach.h>
+#include "jit_reservation_policy.h"
 #include <mach/vm_map.h>
 #include <sys/mman.h>
 #include <stdlib.h>
@@ -884,7 +885,8 @@ void jit_wx_probe(void) {
  * middle of the hole the pool needs. We cannot stop the runtime allocating, but
  * we can get there first: a constructor runs before main, before SwiftUI, Metal
  * or the log store exist. Hold the window, then hold the largest contiguous run
- * directly above it. Both are PROT_NONE reservations and cost no memory.
+ * in the safe native band. Both reservations are PROT_NONE and do not
+ * commit physical memory.
  * StikJITHelper releases the pool placeholder immediately before asking the
  * debugger for RX, and plugs any lower hole that would win first-fit. */
 #include <mach/mach.h>
@@ -903,14 +905,39 @@ __attribute__((constructor(101), used)) static void madeira_early_va_claim(void)
         vm_protect(mach_task_self(), a, winsz, 0, VM_PROT_NONE);
         madeira_early_window_base = win; madeira_early_window_size = winsz;
     }
-    /* Largest no-overwrite run starting at the window's end, 16MB granularity. */
-    for (sz = 1024ul << 20; sz >= (256ul << 20); sz -= (16ul << 20)) {
-        a = win + winsz;
-        if (vm_allocate(mach_task_self(), &a, sz, VM_FLAGS_FIXED) == KERN_SUCCESS && a == win + winsz) {
-            vm_protect(mach_task_self(), a, sz, 0, VM_PROT_NONE);
-            madeira_early_pool_base = a; madeira_early_pool_size = sz;
-            break;
+    /* A small allocation immediately above the EXE window used to defeat
+     * every attempt at that one address. Walk the actual low native map and
+     * reserve its largest safe hole before SwiftUI/Metal can fragment it.
+     * Fixed means no-overwrite; no foreign mapping is moved or released. */
+    for (unsigned retry = 0; retry < 3 && !madeira_early_pool_size; ++retry) {
+        uint64_t best_base = 0, best_size = 0, cursor = MADEIRA_EARLY_POOL_LOW;
+        for (unsigned regions = 0; regions < 2048 && cursor < MADEIRA_EARLY_POOL_HIGH; ++regions) {
+            vm_address_t address = (vm_address_t)cursor;
+            vm_size_t length = 0;
+            vm_region_basic_info_data_64_t info;
+            mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+            mach_port_t object = MACH_PORT_NULL;
+            kern_return_t kr = vm_region_64(mach_task_self(), &address, &length,
+                                            VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &count, &object);
+            if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
+            if (kr == KERN_INVALID_ADDRESS) {
+                madeira_consider_pool_hole(cursor, MADEIRA_EARLY_POOL_HIGH, &best_base, &best_size);
+                break;
+            }
+            if (kr != KERN_SUCCESS || !length || address > UINT64_MAX - length) break;
+            madeira_consider_pool_hole(cursor, address, &best_base, &best_size);
+            uint64_t next = (uint64_t)address + length;
+            if (next <= cursor) break;
+            cursor = next;
         }
+        if (!best_size) break;
+        a = (vm_address_t)best_base; sz = (vm_size_t)best_size;
+        if (vm_allocate(mach_task_self(), &a, sz, VM_FLAGS_FIXED) != KERN_SUCCESS) continue;
+        if (a != best_base || vm_protect(mach_task_self(), a, sz, 0, VM_PROT_NONE) != KERN_SUCCESS) {
+            vm_deallocate(mach_task_self(), a, sz);
+            continue;
+        }
+        madeira_early_pool_base = a; madeira_early_pool_size = sz;
     }
     /* ml1135: NAME what blocked it. ph-rdr90 got no placeholder because a ~31MB
      * mapping already sat at ~0x157d00000 before this constructor ran, leaving

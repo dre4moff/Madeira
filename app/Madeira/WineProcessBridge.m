@@ -21,6 +21,8 @@
 #include <dirent.h>
 #include "../../build/graphics_profile.h"
 #include "../../build/launch_arguments.h"
+#include "../../build/wineserver/timezone_bias.h"
+#include "../../build/ntdll-unix/audio_route.h"
 #include "../../build/madeira_cfg.h"   /* ml1095: one config file */
 #include "../../build/vcruntime_overrides.h"
 #include "../../build/ntdll-unix/runtime_profiling.h"
@@ -52,6 +54,83 @@ static os_log_t wine_proc_log(void) {
 }
 
 #define LOG(fmt, ...) os_log(wine_proc_log(), "[WineProc] " fmt, ##__VA_ARGS__)
+
+/* Route snapshots are taken outside the real-time RemoteIO callback. */
+static pthread_mutex_t audio_routes_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct madeira_audio_routes audio_routes;
+static void audio_port(struct madeira_audio_endpoint *dst, AVAudioSessionPortDescription *port) {
+    snprintf(dst->uid, sizeof(dst->uid), "%s", port.UID.UTF8String ?: "");
+    NSUInteger count = MIN(port.portName.length, 127);
+    [port.portName getCharacters:dst->name range:NSMakeRange(0, count)];
+}
+void madeira_audio_refresh_routes(void) {
+    @autoreleasepool {
+        AVAudioSession *session = AVAudioSession.sharedInstance;
+        struct madeira_audio_routes next = {0};
+        next.microphone = [NSUserDefaults.standardUserDefaults boolForKey:@"madeiraMicrophoneEnabled"] &&
+                          session.recordPermission == AVAudioSessionRecordPermissionGranted;
+        for (AVAudioSessionPortDescription *port in session.currentRoute.outputs) {
+            if (next.render_count == MADEIRA_AUDIO_ENDPOINTS) break;
+            audio_port(&next.render[next.render_count++], port);
+        }
+        if (next.microphone) for (AVAudioSessionPortDescription *port in session.availableInputs) {
+            if (next.capture_count == MADEIRA_AUDIO_ENDPOINTS) break;
+            unsigned i = next.capture_count++;
+            audio_port(&next.capture[i], port);
+            if ([port.UID isEqualToString:session.currentRoute.inputs.firstObject.UID]) next.capture_default = i;
+        }
+        pthread_mutex_lock(&audio_routes_lock); audio_routes = next; pthread_mutex_unlock(&audio_routes_lock);
+    }
+}
+void madeira_audio_get_routes(struct madeira_audio_routes *routes) {
+    pthread_mutex_lock(&audio_routes_lock); *routes = audio_routes; pthread_mutex_unlock(&audio_routes_lock);
+}
+int madeira_audio_select_input(const char *uid) {
+    @autoreleasepool {
+        struct madeira_audio_routes routes; madeira_audio_get_routes(&routes);
+        if (!routes.microphone || !uid) return 0;
+        AVAudioSession *session = AVAudioSession.sharedInstance;
+        for (AVAudioSessionPortDescription *port in session.availableInputs) {
+            if (strcmp(port.UID.UTF8String, uid)) continue;
+            NSError *error = nil;
+            BOOL ok = [session setPreferredInput:port error:&error];
+            if (ok) [NSUserDefaults.standardUserDefaults setObject:port.UID forKey:@"madeiraPreferredAudioInput"];
+            madeira_audio_refresh_routes();
+            return ok;
+        }
+        return 0;  /* No fabricated microphone or substitution for a removed UID. */
+    }
+}
+void madeira_audio_prepare(void) {
+    @autoreleasepool {
+        AVAudioSession *session = AVAudioSession.sharedInstance;
+        BOOL microphone = [NSUserDefaults.standardUserDefaults boolForKey:@"madeiraMicrophoneEnabled"] &&
+                          session.recordPermission == AVAudioSessionRecordPermissionGranted;
+        NSError *error = nil;
+        AVAudioSessionCategoryOptions options = microphone ?
+            AVAudioSessionCategoryOptionDefaultToSpeaker | AVAudioSessionCategoryOptionAllowBluetooth : 0;
+        [session setCategory:microphone ? AVAudioSessionCategoryPlayAndRecord : AVAudioSessionCategoryPlayback
+                      mode:AVAudioSessionModeDefault options:options error:&error];
+        if (!error) [session setActive:YES error:&error];
+        if (!error && microphone) {
+            NSString *preferred = [NSUserDefaults.standardUserDefaults stringForKey:@"madeiraPreferredAudioInput"];
+            for (AVAudioSessionPortDescription *port in session.availableInputs)
+                if ([port.UID isEqualToString:preferred]) { [session setPreferredInput:port error:nil]; break; }
+        }
+        if (error) dprintf(2, "[audio-route] session setup failed code=%ld\n", (long)error.code);
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            [NSNotificationCenter.defaultCenter addObserverForName:AVAudioSessionRouteChangeNotification
+                                                            object:session queue:nil usingBlock:^(NSNotification *note) {
+                madeira_audio_refresh_routes();
+            }];
+        });
+        madeira_audio_refresh_routes();
+        struct madeira_audio_routes routes; madeira_audio_get_routes(&routes);
+        dprintf(2, "[audio-route] actual outputs=%u inputs=%u microphone-permission=%d\n",
+                routes.render_count, routes.capture_count, microphone);
+    }
+}
 
 /* ---- ml581: undo the hand-made AppData skeleton ------------------------
  *
@@ -956,19 +1035,7 @@ static void *wine_process_thread(void *arg) {
         /* 2026-07-05 audio: activate the AVAudioSession before Wine boots
          * so the RemoteIO unit in the mmdevapi driver can start. Playback
          * category = ignores silent switch (it's a game). */
-        {
-            NSError *aerr = nil;
-            AVAudioSession *session = [AVAudioSession sharedInstance];
-            [session setCategory:AVAudioSessionCategoryPlayback error:&aerr];
-            if (aerr) LOG("AVAudioSession setCategory failed: %{public}s",
-                          aerr.localizedDescription.UTF8String);
-            aerr = nil;
-            [session setActive:YES error:&aerr];
-            if (aerr) LOG("AVAudioSession setActive failed: %{public}s",
-                          aerr.localizedDescription.UTF8String);
-            else LOG("AVAudioSession active: rate=%.0f latency=%.1fms",
-                     session.sampleRate, session.outputLatency * 1000.0);
-        }
+        madeira_audio_prepare();
 
         /* 2026-07-04 BISECT RESULT: arm A (this env set, all handler fixes
          * on) booted to menu at 17-18 FPS with the x18-access emulator
@@ -1187,6 +1254,8 @@ static void *wine_process_thread(void *arg) {
         else unsetenv("MADEIRA_STEAM_HOST_DIRECTX11");
         setenv("MADEIRA_STEAM_HOST_LAUNCH_ARGUMENTS", selectedGameArguments, 1);
         wine_refresh_timezone();
+        dprintf(STDERR_FILENO, "[clock-compat] host-unix-seconds=%lld utc-bias-seconds=%lld tick-multiplier=0x1000000 source=host-realtime\n",
+                (long long)time(NULL), (long long)(madeira_cached_timezone_bias() / INT64_C(10000000)));
         dprintf(STDERR_FILENO, "[graphics-profile] DirectX 11 request=%d (Steam user args: %s)\n",
                 forceDirectX11, forceDirectX11 ? "-dx11" : "default");
         if (nativeVCRuntime)

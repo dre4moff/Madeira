@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+import AVFoundation
+import AVKit
+import UIKit
 
 /// Only reconstructible, explicitly owned paths. Never walks the Wine prefix,
 /// Steam downloads, Application Support, saves, library or login data.
@@ -132,22 +135,33 @@ struct OwnedCacheCleaner {
 
 enum CacheMaintenance {
     private static let queue = DispatchQueue(label: "com.madeira.cache-maintenance", qos: .utility)
+    // UI reads must not wait behind a potentially long filesystem scan.
+    // The queue still serializes cleanup and the launch barrier; this lock
+    // protects only the process-lifetime flag, never the scan itself.
+    private static let stateLock = NSLock()
     private static var launched = false
     private static var startupDone = false
-    static var available: Bool { queue.sync { !launched } }
+    static var available: Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return !launched
+    }
     static func start() {
         queue.async {
-            guard !startupDone, !launched else { return }
+            guard !startupDone, available else { return }
             startupDone = true
             if UserDefaults.standard.object(forKey: "madeiraAutomaticCacheCleanup") as? Bool != false { _ = clean() }
         }
     }
     /// Serializes with startup/manual cleanup before any Wine/cache files open.
-    static func prepareForLaunch() { queue.sync { launched = true } }
+    static func prepareForLaunch() {
+        queue.sync {
+            stateLock.lock(); launched = true; stateLock.unlock()
+        }
+    }
     static func manual(completion: @escaping (String) -> Void) {
         queue.async {
             let message: String
-            if launched { message = "Restart Madeira to clean caches safely." }
+            if !available { message = "Restart Madeira to clean caches safely." }
             else {
                 let result = clean()
                 message = summary(result)
@@ -200,4 +214,76 @@ struct CacheStorageSettings: View {
             Text("Cleans leftover temporary files at startup. The shadercache folder stores compiled shaders for reuse. Shader caches unused for 30 days are removed only above the target; recent caches are kept even above it to avoid recompilation. The old fex-jit-dump.bin file was a diagnostic dump, not the running JIT, and is no longer generated automatically. Games, saves and Steam data are preserved. Restart Madeira after playing to clean safely.")
         }
     }
+}
+
+/// iOS owns output routing. Its picker lists routes the system can actually
+/// select; availableInputs lists only currently usable microphone ports.
+struct AudioDeviceSettings: View {
+    var inSession = false
+    @AppStorage("madeiraMicrophoneEnabled") private var microphone = false
+    @State private var inputs: [AVAudioSessionPortDescription] = []
+    @State private var selected = ""
+    @State private var output = "System default"
+    @State private var message = ""
+    @State private var requesting = false
+    var body: some View {
+        Section {
+            Toggle("Enable microphone for games", isOn: Binding(get: { microphone }, set: setMicrophone))
+                .disabled(requesting || !CacheMaintenance.available)
+            if microphone {
+                Picker("Microphone input", selection: Binding(get: { selected }, set: selectInput)) {
+                    Text("System default").tag("")
+                    ForEach(inputs, id: \.uid) { Text($0.portName).tag($0.uid) }
+                }.disabled(!inSession && !CacheMaintenance.available)
+            }
+            LabeledContent("Current audio output", value: output)
+            SystemAudioRoutePicker().frame(height: 40)
+            if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.secondary) }
+        } header: { Text("Audio devices") } footer: {
+            Text("Enable microphone access before starting a game, then select its input in the game. Only connected inputs and the actual output route are exposed to Windows. iOS selects speaker, headphones and wireless outputs through the route button. Recording uses the real microphone; denied access is never replaced with a fake device. Changing Bluetooth input may reduce output quality. Restart Madeira after playing to change microphone access.")
+        }
+        .onAppear { if microphone && CacheMaintenance.available { madeira_audio_prepare() }; refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in refresh() }
+    }
+    private func refresh() {
+        let session = AVAudioSession.sharedInstance()
+        inputs = session.availableInputs ?? []
+        selected = session.preferredInput?.uid ?? ""
+        output = session.currentRoute.outputs.map(\.portName).joined(separator: ", ")
+        if output.isEmpty { output = "System default" }
+    }
+    private func setMicrophone(_ enabled: Bool) {
+        guard CacheMaintenance.available else { return }
+        if !enabled { microphone = false; madeira_audio_prepare(); refresh(); return }
+        requesting = true
+        AVAudioSession.sharedInstance().requestRecordPermission { granted in
+            DispatchQueue.main.async {
+                requesting = false
+                guard CacheMaintenance.available else { return }
+                microphone = granted
+                message = granted ? "Microphone available to games on the next launch." :
+                    "Microphone permission denied. Enable it in iPhone Settings › Madeira."
+                if granted { madeira_audio_prepare() }
+                refresh()
+            }
+        }
+    }
+    private func selectInput(_ uid: String) {
+        guard uid.isEmpty || inputs.contains(where: { $0.uid == uid }) else { refresh(); return }
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setPreferredInput(inputs.first(where: { $0.uid == uid }))
+            if uid.isEmpty { UserDefaults.standard.removeObject(forKey: "madeiraPreferredAudioInput") }
+            else { UserDefaults.standard.set(uid, forKey: "madeiraPreferredAudioInput") }
+            madeira_audio_refresh_routes(); refresh()
+        } catch { message = "This input could not be selected."; refresh() }
+    }
+}
+
+private struct SystemAudioRoutePicker: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView(); view.prioritizesVideoDevices = false; return view
+    }
+    func updateUIView(_ view: AVRoutePickerView, context: Context) {}
 }

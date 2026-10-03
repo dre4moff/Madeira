@@ -24,6 +24,7 @@
 #include "poll_fd_cache.h"
 #include "request_wake_gate.h"
 #include "timezone_bias.h"
+#include "shared_tick.h"
 #include <os/log.h>
 #include <mach/mach_time.h>
 #include <mach/mach_init.h>
@@ -594,6 +595,9 @@ void set_current_time(void)
          * publishes after every event-loop wake. Throttling changed nothing and
          * only added a variable. */
         timeout_t tc = monotonic_time / 10000;
+        /* Wine APIs ignore this field, but native Windows direct readers do
+         * not. Zero made every scaled tick zero despite the advancing count. */
+        atomic_store_ulong(&user_shared_data->TickCountMultiplier, MADEIRA_TICK_MULTIPLIER);
 
         /* SystemTime is published too. GetSystemTimeAsFileTime() does not read
          * this page on iOS -- it goes to clock_gettime, which is why clocktest

@@ -20,6 +20,7 @@
 #include <initguid.h>
 #include <windows.h>
 #include <d3d12.h>
+#include "read_barrier_policy.h"
 #include <dxgi1_5.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -297,6 +298,8 @@ static LONG g_vis_begun, g_vis_resolved, g_vis_nonzero, g_vis_restarts;   /* ml1
 static LONG g_srv_clamped; static float g_srv_clamp_max;   /* ml1089 */
 static LONG g_zero_inst;   /* ml1094 */
 static LONG g_fence_waits, g_fence_updates, g_barriers;   /* ml1091 */
+static LONG g_read_barriers_elided;
+static int g_read_barrier_elision = -1;
 static LONG g_f6_begins, g_f6_synced, g_f6_att_sync, g_f6_kept_open, g_f6_joins, g_f6_rclose;   /* ml1134 */
 /* ml1137: GPU census, counts only. Barrier entries by the states they move
  * between, and what a state-aware wait rule would have needed at each
@@ -4615,6 +4618,9 @@ static void mad_perf_present(void) {
                       g_perf_presents ? (double)(cw - lw) / g_perf_presents : 0.0, g_perf_presents ? (double)(cu - lu) / g_perf_presents : 0.0,
                       g_perf_presents ? (double)(cb - lb) / g_perf_presents : 0.0, g_fence_chain);
             lw = cw; lu = cu; lb = cb;
+            LONG read_elided = InterlockedExchange(&g_read_barriers_elided, 0);
+            d3d12_log("[perf] r25 read-only transitions omitted %.1f per frame; write/UAV/alias/split fences preserved\n",
+                      g_perf_presents ? (double)read_elided / g_perf_presents : 0.0);
             if (g_f6_used && g_perf_presents) {   /* ml1134 */
                 double np = (double)g_perf_presents;
                 LONG b = InterlockedExchange(&g_f6_begins, 0), sy = InterlockedExchange(&g_f6_synced, 0), at = InterlockedExchange(&g_f6_att_sync, 0);
@@ -10026,13 +10032,17 @@ static void STDMETHODCALLTYPE list_ResourceBarrier(ID3D12GraphicsCommandList *Th
      * (render passes are closed by their target changes), and the encoder
      * fence chain does the rest. Consecutive barrier calls fold into one. */
     struct mad_list *l = (struct mad_list *)This;
-    struct mad_cmd *c; UINT i;
+    struct mad_cmd *c = NULL; UINT i, skipped = 0;
     if (!n) return;
+    if (g_read_barrier_elision < 0) g_read_barrier_elision = mad_cfg_int_pe("read-barrier-elision", 1) != 0;
     InterlockedIncrement(&g_barriers);
-    if (l->ncmds && l->cmds[l->ncmds - 1].kind == MC_BARRIER) c = &l->cmds[l->ncmds - 1];
-    else { c = mad_list_push(l, MC_BARRIER); if (!c) return; }
-    if (c->u.barrier.n == 0 && !c->u.barrier.all) c->u.barrier.cls_noref = BC_NONE;
     for (i = 0; i < n; i++) {   /* ml1116: fence-chain = 3 waits only for resources an encoder in flight wrote */
+        if (g_read_barrier_elision && madeira_read_barrier_redundant(&b[i])) { ++skipped; continue; }
+        if (!c) {
+            if (l->ncmds && l->cmds[l->ncmds - 1].kind == MC_BARRIER) c = &l->cmds[l->ncmds - 1];
+            else { c = mad_list_push(l, MC_BARRIER); if (!c) return; }
+            if (c->u.barrier.n == 0 && !c->u.barrier.all) c->u.barrier.cls_noref = BC_NONE;
+        }
         struct mad_resource *r = NULL;
         UINT8 cls = BC_ALL;
         const UINT W = D3D12_RESOURCE_STATE_RENDER_TARGET | D3D12_RESOURCE_STATE_UNORDERED_ACCESS | D3D12_RESOURCE_STATE_DEPTH_WRITE |
@@ -10059,6 +10069,7 @@ static void STDMETHODCALLTYPE list_ResourceBarrier(ID3D12GraphicsCommandList *Th
         if (c->u.barrier.n < 8) { c->u.barrier.cls[c->u.barrier.n] = cls; c->u.barrier.res[c->u.barrier.n++] = r; }
         else { c->u.barrier.all = 1; c->u.barrier.cls_noref = BC_ALL; }
     }
+    if (skipped) InterlockedExchangeAdd(&g_read_barriers_elided, skipped);
 }
 /* ml889: ExecuteIndirect. D3D12's argument records are byte-for-byte Metal's
  * indirect argument structs (DRAW_ARGUMENTS == MTLDrawPrimitivesIndirectArguments,

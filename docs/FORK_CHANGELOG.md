@@ -1,4 +1,4 @@
-# Complete fork changes — Madeira 0.1.1 / r23
+# Complete fork changes — Madeira 0.1.1 / r25
 
 This unofficial fork is based on Will Faust's official `v0.1.1`
 (`ca3183ea3dfb0fd706aff1bea2abb871b5d27aec`). Original copyright and licenses
@@ -6,6 +6,27 @@ are retained. Fork changes were prepared with AI assistance and are offered
 for inspection, not as an upstream endorsement or a guaranteed FPS increase.
 The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
+
+## r25 — Native JIT placement, responsive settings and real microphone
+
+- Reserve the largest actual free hole in the bounded native executable band
+  at image load, rather than retry one blocked address. Never overwrite or
+  release someone else's mapping; fixed-base executable reservation retained.
+- UI cache-availability reads use a short lock rather than waiting behind a
+  filesystem scan. Launch/cleanup serialization and warm shader cache retention
+  are unchanged.
+- Expose actual iOS audio route endpoints, request microphone access explicitly,
+  persist preferred input, add settings/session route controls and implement
+  real RemoteIO capture with WASAPI packets, PCM conversion and resampling.
+  Denied/unavailable capture fails instead of returning a fabricated device.
+- Remove legacy continuous output sample analysis and raw sample-word logging.
+- D3D12 records no command for known read-only→read-only transitions. Retain
+  COMMON/PRESENT, writes, UAV, aliasing, split and unknown-state hazards plus
+  every previously recorded fence. Config `read-barrier-elision=0` opts out.
+- Include the locally tested r24 Q24 shared-tick multiplier correction.
+- Optimized Release, build 9; 28 synthetic suites pass. FEX/source/DLLs and all
+  unrelated native archive objects retained. No device FPS uplift or successful
+  online matchmaking claimed; manual-time warning is still under investigation.
 
 ## r23 launch and clock consistency
 

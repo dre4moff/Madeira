@@ -86,7 +86,7 @@ with tempfile.TemporaryDirectory(prefix='madeira-cache-cleanup-') as tmp:
  subprocess.run(['swiftc','-sanitize=address',str(p/'main.swift'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test'),str(p/'fixtures')],check=True)
 # Serial startup/manual cleanup cannot race the launch opening its DBs.
-assert 'queue.sync { launched = true }' in (root/'app/Madeira/CacheMaintenance.swift').read_text()
+assert 'stateLock.lock(); launched = true; stateLock.unlock()' in (root/'app/Madeira/CacheMaintenance.swift').read_text()
 content=(root/'app/Madeira/ContentView.swift').read_text()
 assert content.index('CacheMaintenance.prepareForLaunch()') < content.index('profile.applyEnvironment()')
 print('PASS: launch/cache-cleanup serialization')

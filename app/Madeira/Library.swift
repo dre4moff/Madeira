@@ -2046,6 +2046,7 @@ struct LibraryView: View {
                 SteamSettingsSection(open: { settingsSheet = $0 })
             }
             if settingsShow("storage", "cache", "temporary", "clean") { CacheStorageSettings() }
+            if settingsShow("audio", "sound", "microphone", "input", "output", "headphones") { AudioDeviceSettings() }
             if settingsShow("appearance", "liquid metal", "metal", "glass") {
                 Section {
                     Toggle("Liquid metal", isOn: $liquidMetal.on)
@@ -3048,6 +3049,8 @@ struct LibraryHUD: View {
                         }.pickerStyle(.menu).labelsHidden()
                     }
                 }
+                Divider()
+                AudioDeviceSettings(inSession: true)
                 Divider()
                 Text("Mouse & pointer").font(.headline)
                 LibraryPointerSettings()

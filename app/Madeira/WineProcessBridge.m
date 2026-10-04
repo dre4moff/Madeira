@@ -1241,6 +1241,13 @@ static void *wine_process_thread(void *arg) {
         dprintf(STDERR_FILENO, "[audio-com-policy] MMDevice implicit MTA=%s\n",
                 getenv("MADEIRA_MMDEVICE_IMPLICIT_MTA") ?: "0");
 
+        // Local A/B build: enforce after user config, before any game renderer.
+        // Existing cache files are bypassed and preserved, never purged here.
+        setenv("DXMT_SHADER_CACHE", "0", 1);
+        setenv("DXMT_USE_DEFAULT_METAL_CACHE", "1", 1);
+        setenv("DXMT_CACHE_STATS", "0", 1);
+        dprintf(STDERR_FILENO, "[shader-cache-test] r30-cache-off-test DXMT-disk=off custom-Metal-path=off driver-cache=system-managed\n");
+
         // Session-only Wine load order, inherited by Steam/Dock's children.
         // Applying after global config preserves other DLL overrides while the
         // game's switch takes precedence for these five libraries only.

@@ -8,7 +8,14 @@ s=(root/'dxmt/src/winemetal/unix/cache.c').read_text()
 classes=s[s.index('@interface CacheReader :'):s.index('\nint\n_CacheReader_alloc_init')]
 classes=classes.replace('NSSearchPathForDirectoriesInDomains(', 'fakeSearchPaths(').replace('confstr(', 'fakeConfstr(')
 wrapper=s[s.index('int\n_WMTSetMetalShaderCachePath('):s.index('\n#else\n\nint\nWMTSetMetalShaderCachePath')]
+allocs=''
+for name,next_name in [('_CacheReader_alloc_init','_CacheReader_get'),('_CacheWriter_alloc_init','_CacheWriter_set')]:
+ start=s.index('int\n'+name+'(')
+ allocs+=s[start:s.index('int\n'+next_name+'(',start)]
 bridge=(root/'app/Madeira/WineProcessBridge.m').read_text()
+trial_start=bridge.index('        setenv("DXMT_SHADER_CACHE", "0", 1);')
+trial=bridge[trial_start:bridge.index("        // Session-only Wine load order",trial_start)]
+assert bridge.index('madeira.cfg env:') < trial_start < bridge.index('madeira_apply_vcruntime_overrides(nativeVCRuntime);')
 default='setenv("DXMT_IOS_CACHE_DIR", "1", 0);'
 assert default in bridge and bridge.index(default)<bridge.index('madeira.cfg env:')
 code=r'''
@@ -40,8 +47,10 @@ static size_t fakeConfstr(int n, char *buf, size_t cap) {
 }
 void MTLSetShaderCachePath(NSString *path) { metalSets++; [metalPath release]; metalPath=[path copy]; }
 NSString *MTLGetShaderCachePath(void) { return metalPath; }
+typedef uint64_t obj_handle_t;
+struct unixcall_cache_alloc_init {struct {const char *ptr;} path;uint64_t version;obj_handle_t ret_cache;};
 struct unixcall_setmetalcachepath { struct { const char *ptr; } path; uint64_t ret_success; };
-''' + classes + wrapper + r'''
+''' + classes + allocs + wrapper + '\nstatic void apply_trial(void) {\n'+trial+'}\n'+r'''
 static void expect_data(dispatch_data_t data, const char *expected) {
  assert(data);
  const void *bytes; size_t size;
@@ -91,6 +100,31 @@ int main(int argc, char **argv) { @autoreleasepool {
  assert(legacyCalls==1);
  unsetenv("DXMT_IOS_CACHE_DIR"); window=1; assert(use_ios_cache_dir());
  window=0; assert(!use_ios_cache_dir());
+ // Run the actual cache entry points, not only the path resolver.
+ setenv("DXMT_SHADER_CACHE","1",1);setenv("DXMT_IOS_CACHE_DIR","1",1);
+ struct unixcall_cache_alloc_init alloc={{[resolved fileSystemRepresentation]},15,0};
+ _CacheReader_alloc_init(&alloc); assert(alloc.ret_cache);[(id)alloc.ret_cache release];
+ _CacheWriter_alloc_init(&alloc); assert(alloc.ret_cache);[(id)alloc.ret_cache release];
+ NSArray *beforeFiles=[[NSFileManager defaultManager] subpathsAtPath:base];
+ NSData *beforeDB=[NSData dataWithContentsOfFile:resolved];
+ NSDictionary *beforeAttrs=[[NSFileManager defaultManager] attributesOfItemAtPath:resolved error:NULL];
+ setenv("DXMT_SHADER_CACHE","1",1);setenv("DXMT_CACHE_STATS","1",1);setenv("DXMT_USE_DEFAULT_METAL_CACHE","0",1);
+ apply_trial();assert(!strcmp(getenv("DXMT_SHADER_CACHE"),"0") && !strcmp(getenv("DXMT_CACHE_STATS"),"0") && !strcmp(getenv("DXMT_USE_DEFAULT_METAL_CACHE"),"1"));
+ int beforeSets=metalSets,beforeLegacy=legacyCalls;
+ for (unsigned i=0;i<1000;i++) {
+  // Invalid paths must not even be dereferenced in the disabled branch.
+  alloc.path.ptr=(const char *)1;alloc.ret_cache=UINT64_MAX;
+  _CacheReader_alloc_init(&alloc);assert(!alloc.ret_cache);
+  alloc.ret_cache=UINT64_MAX;_CacheWriter_alloc_init(&alloc);assert(!alloc.ret_cache);
+  params.path.ptr=(const char *)1;params.ret_success=99;
+  _WMTSetMetalShaderCachePath(&params);assert(!params.ret_success);
+ }
+ assert(metalSets==beforeSets && legacyCalls==beforeLegacy);
+ assert([beforeFiles isEqual:[[NSFileManager defaultManager] subpathsAtPath:base]]);
+ assert([beforeDB isEqual:[NSData dataWithContentsOfFile:resolved]]);
+ assert([beforeAttrs[NSFileModificationDate] isEqual:[[NSFileManager defaultManager] attributesOfItemAtPath:resolved error:NULL][NSFileModificationDate]]);
+ unsetenv("DXMT_SHADER_CACHE");
+ puts("PASS: actual reader/writer/Metal entry points bypass 3000 calls before path/SQLite/Metal access, preserve files; trial overrides user config");
  [reader release]; [writer release]; dispatch_release(data); [metalPath release]; [base release];
  puts("PASS: actual iOS cache resolution, opt-out, absolute paths, SQLite cold/warm/reopen/version separation and failure fallback; Metal API mocked");
 } }

@@ -1,14 +1,14 @@
 # Fork release and personal runtime setup
 
-Release: `v0.1.3-fork-r29`, based on official Madeira `v0.1.3`. This is an
+Release: `v0.1.3-fork-r30`, based on official Madeira `v0.1.3`. This is an
 unofficial, experimental prerelease. The app is optimized Release (`-O2` native,
-`-O` whole-module Swift), build 13, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
-Texture upload changes and swap limits are explained in [the r29 report](R29_TEXTURE_STREAMING.md).
+`-O` whole-module Swift), build 14, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
+Texture copy changes and the r29 regression are explained in [the r30 report](R30_NATIVE_TEXTURE_UPLOADS.md).
 The public IPA is unsigned; it needs personal signing/sideloading and JIT.
 
 ## Install
 
-1. Download `Madeira-0.1.3-Fork-r29-Release-unsigned.ipa` from
+1. Download `Madeira-0.1.3-Fork-r30-Release-unsigned.ipa` from
    [this fork's releases](https://github.com/dre4moff/Madeira/releases).
 2. For games needing Microsoft native VC++ runtime, first prepare your personal
    IPA as below. Microsoft binaries are deliberately absent from public assets.
@@ -40,9 +40,9 @@ Run on macOS with Python 3:
 
 ```sh
 python3 tools/prepare-vcruntime-ipa.py \
-  --ipa /path/to/Madeira-0.1.3-Fork-r29-Release-unsigned.ipa \
+  --ipa /path/to/Madeira-0.1.3-Fork-r30-Release-unsigned.ipa \
   --runtime-dir /path/to/your/unmodified-x64-runtime \
-  --output /path/to/Madeira-r29-personal-unsigned.ipa
+  --output /path/to/Madeira-r30-personal-unsigned.ipa
 ```
 
 The helper checks x64 PE headers and intact certificate ranges, preserves DLL
@@ -55,7 +55,7 @@ about app extensions; built-in JIT requires it. See [JIT setup](JIT.md). These p
 ## Source and rebuilding
 
 ```sh
-git clone --recurse-submodules --branch v0.1.3-fork-r29 \
+git clone --recurse-submodules --branch v0.1.3-fork-r30 \
   https://github.com/dre4moff/Madeira.git
 ```
 
@@ -102,9 +102,10 @@ The release's verification manifest contains the public asset digest, native
 UUID, unsigned Mach-O inspection, original FEX identities, resource comparison,
 optimization evidence and tests. Native and dSYM UUIDs match.
 See the current `verification.json` and `dwarfdump --uuid` output; symbols remain outside the IPA.
-r29 retains the official 0.1.3 app and native changes with all retained fork
-fixes. All native archives match r28 byte for byte, preserving the r27
-thread/signal engine and the shader converter cache identity. See [r29 streaming analysis](R29_TEXTURE_STREAMING.md).
+r30 retains the official 0.1.3 app and native changes with all retained fork
+fixes. The native WineMetal object gains the upload operation; every other
+native object matches r29, preserving the r27 thread/signal engine and the
+shader converter cache identity. See [r30 analysis](R30_NATIVE_TEXTURE_UPLOADS.md).
 
 [Complete changes](FORK_CHANGELOG.md) distinguish observed gameplay, synthetic
 operation counts and unverified FPS/graphics outcomes. Compare the same map,

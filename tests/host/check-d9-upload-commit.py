@@ -19,7 +19,7 @@ ring = (dx / "dxmt/dxmt_ring_bump_allocator.hpp").read_text()
 # Part A: the real ring template with a counting allocator.
 body = ring[ring.index("#if defined(__i386__) && !defined(DXMT_MADEIRA)\nconstexpr size_t kStagingBlockSize"):]
 body = body[:body.index("class GpuPrivateBufferBlockAllocator")] + \
-    body[body.index("template <typename Allocator, size_t BlockSize, class mutex, bool InclusiveCompletion>\nstd::pair"):]
+    body[body.index("template <typename Allocator, size_t BlockSize, class mutex>\nstd::pair"):]
 body = body.replace("} // namespace dxmt", "")
 harness = r"""
 #include <cstdint>

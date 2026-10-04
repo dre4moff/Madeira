@@ -1,4 +1,4 @@
-# Complete fork changes — Madeira 0.1.3 / r29
+# Complete fork changes — Madeira 0.1.3 / r30
 
 This unofficial fork is based on Will Faust's official `v0.1.3`
 (`4e9d45a74294cd820120791c4b3f2b79adf4fc70`). Original copyright and licenses
@@ -6,6 +6,23 @@ are retained. Fork changes were prepared with AI assistance and are offered
 for inspection, not as an upstream endorsement or a guaranteed FPS increase.
 The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
+
+## r30 — Restore batching and execute texture copies natively
+
+- Revert r29 compact 8 MiB upload rings, additional retention/completion policy,
+  and automatic 64 MiB initialization submissions to the complete r28 policy.
+  The user reports shorter but more frequent stutters and confirms transient
+  memory peaks were never a problem to solve.
+- Replace guest-side texture memcpy loops with one native WineMetal operation
+  for each local initial/streamed upload. Copies retain padded row and depth
+  strides, BC handling, original staging ownership and GPU dependencies. No
+  extra image allocation, submission, wait or cache purge is introduced.
+- Append Unix-call slot 151 without renumbering existing slots; preserve remote
+  explicit uploads, WoW64 pointer translation and the existing opt-out.
+- Existing 64-frame Present summaries now count gaps above 50 and 100 ms to
+  distinguish recurring spikes from a single long loading frame.
+- Optimized Release, build 14. Host/ASan/UBSan checks and packaging are separate
+  from physical-device FPS acceptance. See [r30 report](R30_NATIVE_TEXTURE_UPLOADS.md).
 
 ## r29 — Texture streaming overhead and upload memory
 

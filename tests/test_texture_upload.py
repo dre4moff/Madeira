@@ -10,13 +10,16 @@ src=r'''
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#define DXMT_IOS 1
 #include "dxmt_texture_upload.hpp"
+#include "texture_upload_copy.h"
 using dxmt::copyTextureUpload;
 size_t align(size_t x,size_t y) {return (x+y-1)/y*y;}
 const char *ptr_add(const void *p,size_t n) {return static_cast<const char *>(p)+n;}
 struct Buffer {
  std::vector<unsigned char> bytes;
  size_t calls=0;
+ void updateTextureContents(size_t offset,const void *p,size_t rows,size_t depth,size_t row,size_t pitch,size_t image,size_t valid_row,size_t valid_image) {wmt_copy_texture_upload(bytes.data()+offset,p,rows,depth,row,pitch,image,valid_row,valid_image);}
  void updateContents(size_t offset,const void *p,size_t length) { calls++; memcpy(bytes.data()+offset,p,length); }
 };
 void upload(Buffer &temp,const void *data,bool direct_uploads_,bool mapped,
@@ -49,7 +52,7 @@ int main() {
 '''
 with tempfile.TemporaryDirectory(prefix='madeira-texture-test-') as tmp:
  p=Path(tmp);(p/'test.cpp').write_text(src)
- subprocess.run(['clang++','-std=c++20','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I',str(root/'dxmt/src/dxmt'),str(p/'test.cpp'),'-o',str(p/'test')],check=True)
+ subprocess.run(['clang++','-std=c++20','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I',str(root/'dxmt/src/dxmt'),'-I',str(root/'dxmt/src/winemetal/unix'),str(p/'test.cpp'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)
 ring=(root/'dxmt/src/dxmt/dxmt_ring_bump_allocator.hpp').read_text()
 assert '!(block.buffer.handle & (1ull << 63))' in ring

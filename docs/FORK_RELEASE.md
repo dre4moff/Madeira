@@ -1,14 +1,14 @@
 # Fork release and personal runtime setup
 
-Release: `v0.1.3-fork-r30`, based on official Madeira `v0.1.3`. This is an
+Release: `v0.1.3-fork-r31`, based on official Madeira `v0.1.3`. This is an
 unofficial, experimental prerelease. The app is optimized Release (`-O2` native,
-`-O` whole-module Swift), build 14, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
-Texture copy changes and the r29 regression are explained in [the r30 report](R30_NATIVE_TEXTURE_UPLOADS.md).
+`-O` whole-module Swift), build 16, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
+Manual cache cleanup, the negative cache-disabled trial and remaining movement stutters are explained in [the developer report](R31_PERFORMANCE_REPORT.md).
 The public IPA is unsigned; it needs personal signing/sideloading and JIT.
 
 ## Install
 
-1. Download `Madeira-0.1.3-Fork-r30-Release-unsigned.ipa` from
+1. Download `Madeira-0.1.3-Fork-r31-Release-unsigned.ipa` from
    [this fork's releases](https://github.com/dre4moff/Madeira/releases).
 2. For games needing Microsoft native VC++ runtime, first prepare your personal
    IPA as below. Microsoft binaries are deliberately absent from public assets.
@@ -40,9 +40,9 @@ Run on macOS with Python 3:
 
 ```sh
 python3 tools/prepare-vcruntime-ipa.py \
-  --ipa /path/to/Madeira-0.1.3-Fork-r30-Release-unsigned.ipa \
+  --ipa /path/to/Madeira-0.1.3-Fork-r31-Release-unsigned.ipa \
   --runtime-dir /path/to/your/unmodified-x64-runtime \
-  --output /path/to/Madeira-r30-personal-unsigned.ipa
+  --output /path/to/Madeira-r31-personal-unsigned.ipa
 ```
 
 The helper checks x64 PE headers and intact certificate ranges, preserves DLL
@@ -55,7 +55,7 @@ about app extensions; built-in JIT requires it. See [JIT setup](JIT.md). These p
 ## Source and rebuilding
 
 ```sh
-git clone --recurse-submodules --branch v0.1.3-fork-r30 \
+git clone --recurse-submodules --branch v0.1.3-fork-r31 \
   https://github.com/dre4moff/Madeira.git
 ```
 
@@ -86,7 +86,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -destination 'generic/platform=iOS' -derivedDataPath .build/release \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO ENABLE_DEBUG_DYLIB=NO \
   GCC_OPTIMIZATION_LEVEL=2 SWIFT_OPTIMIZATION_LEVEL=-O \
-  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym CURRENT_PROJECT_VERSION=13 ENABLE_TESTABILITY=NO build
+  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym CURRENT_PROJECT_VERSION=16 ENABLE_TESTABILITY=NO build
 ```
 
 The historical r17/r18/r19 packagers consume local prior artifacts/checkpoints;
@@ -102,10 +102,17 @@ The release's verification manifest contains the public asset digest, native
 UUID, unsigned Mach-O inspection, original FEX identities, resource comparison,
 optimization evidence and tests. Native and dSYM UUIDs match.
 See the current `verification.json` and `dwarfdump --uuid` output; symbols remain outside the IPA.
-r30 retains the official 0.1.3 app and native changes with all retained fork
-fixes. The native WineMetal object gains the upload operation; every other
-native object matches r29, preserving the r27 thread/signal engine and the
-shader converter cache identity. See [r30 analysis](R30_NATIVE_TEXTURE_UPLOADS.md).
+r31 retains official 0.1.3 and all retained fork fixes. The native archives match
+r30 except for the cache entry-point opt-out guard (`cache.o`); 1,057 other DXMT
+objects, native Wine/thread handling and the shader converter identity are
+preserved. Only the ARM64EC D3D11 renderer gains bounded recycling counters.
+See [r31 performance evidence and open issues](R31_PERFORMANCE_REPORT.md).
+
+The manual **Clear shader & temporary caches** button now clears recent DXMT
+and Files `shadercache` entries regardless of the automatic cleanup budget.
+Restart Madeira after playing before using it; the next launch may recompile
+shaders. Automatic cleanup still protects recent caches. The cache-disabled
+trial did not improve the user's experience, so normal cache defaults are restored.
 
 [Complete changes](FORK_CHANGELOG.md) distinguish observed gameplay, synthetic
 operation counts and unverified FPS/graphics outcomes. Compare the same map,

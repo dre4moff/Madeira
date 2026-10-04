@@ -6,7 +6,7 @@ import re
 
 root = Path(__file__).resolve().parents[1]
 new = (root/'dxmt/src/dxmt/dxmt_dynamic.cpp').read_text()
-old = subprocess.check_output(['git', 'show', 'HEAD:src/dxmt/dxmt_dynamic.cpp'], cwd=root/'dxmt').decode()
+old = subprocess.check_output(['git', 'show', '35a4db11bd:src/dxmt/dxmt_dynamic.cpp'], cwd=root/'dxmt').decode()
 def allocator(source, cls):
     a = source.index('Rc<BufferAllocation>\nDynamicBuffer::allocate(')
     b = source.index('\nvoid\nDynamicBuffer::updateImmediateName(', a)
@@ -110,12 +110,23 @@ int main() {
   c.allocate(0,nullptr);d.allocate(0,nullptr);
   assert(c.fifo.visits==10000 && d.fifo.visits==1 && d.fifo.size()==10000); // fenced tail never scanned/freed
   Baseline e;Optimized f;populate(e,f,100,0);
+  g_trim_total_n=0;g_trim_total_bytes=0;g_trim_regret=0;
   e.allocate(100,nullptr);f.allocate(100,nullptr);
   assert(e.fifo.size()==64 && f.fifo.size()==64); // identical warm reserve
+  assert(g_trim_total_n==70 && g_trim_total_bytes==1120); // baseline + new each trim 35
+  assert(g_trim_regret==0);
+  Optimized quiet;Baseline unused;populate(unused,quiet,100,0);
+  g_trim_total_n=0;g_trim_total_bytes=0;
+  quiet.allocate(100,nullptr);
+  assert(g_trim_total_n==35 && g_trim_total_bytes==560 && quiet.fifo.size()==64);
+  Optimized fenced;populate(unused,fenced,10000,1000);
+  fenced.trimmed_last_=true;g_trim_regret=0;
+  fenced.allocate(0,nullptr);
+  assert(g_trim_regret==1 && g_trim_total_n==35 && fenced.fifo.size()==10000);
   printf("PASS: %u baseline-equivalent recycling/trim cases, diagnostic overflow/opt-in, fenced tails, reserve and scan reduction 10000->1\n",compared);
 }
 '''
-with tempfile.TemporaryDirectory(prefix='madeira-r16-recycling-') as folder:
+with tempfile.TemporaryDirectory(prefix='madeira-r31-recycling-') as folder:
     p = Path(folder); (p/'test.cpp').write_text(cpp)
     subprocess.run(['xcrun','clang++','-std=c++20','-O2','-pthread','-fsanitize=address,undefined',str(p/'test.cpp'),'-o',str(p/'test')],check=True)
     subprocess.run([str(p/'test')],check=True,timeout=60)

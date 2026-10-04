@@ -79,6 +79,33 @@ try fm.createSymbolicLink(at: docsAlias, withDestinationURL: docs)
 let aliasDX = OwnedCacheCleaner(caches: caches, temporary: temporary, now: now, targetBytes: 0, documents: docsAlias).clean()
 assert(aliasDX.removedBytes == 0 && aliasDX.cacheBytes == 4096)
 
+
+// Explicit manual purge ignores recency and budget while preserving foreign/linked files.
+let manual = OwnedCacheCleaner(caches: caches, temporary: temporary, now: now, targetBytes: Int64.max,
+                              documents: docs, metalDriverCache: driver.deletingLastPathComponent(),
+                              purgeShaderCaches: true).clean()
+assert(manual.removedBytes == 8448 && manual.cacheBytes == 0)
+for url in [recent, warmDX, currentDX] { assert(!fm.fileExists(atPath: url.path), url.path) }
+for url in [outside, steam, other, foreignDX, driver, linkDX, symlink, active, foreign] {
+    assert(fm.fileExists(atPath: url.path), url.path)
+}
+assert(fm.fileExists(atPath: docs.appendingPathComponent("shadercache").path)) // foreign files remain
+let isolated = root.appendingPathComponent("isolated")
+let isolatedCaches = isolated.appendingPathComponent("Caches")
+let isolatedDocs = isolated.appendingPathComponent("Documents")
+_ = try file("isolated/Caches/dxmt/Game.exe/shaders_320.db", size: 64)
+_ = try file("isolated/Caches/dxmt/Game.exe/shaders_320.db-wal", size: 32)
+_ = try file("isolated/Caches/dxmt/Game.exe/shaders_320.db-shm", size: 32)
+_ = try file("isolated/Caches/dxmt/Game.exe/metal.bin", size: 128)
+_ = try file("isolated/Documents/shadercache/0000000000000001.mdsc", size: 64)
+_ = try file("isolated/Documents/shadercache/0000000000000002.mdxc", size: 64)
+_ = try file("isolated/Documents/shadercache/0000000000000003.mdxc.tmp123", size: 32)
+let isolatedResult = OwnedCacheCleaner(caches: isolatedCaches, temporary: temporary, now: now,
+                                     targetBytes: Int64.max, documents: isolatedDocs,
+                                     purgeShaderCaches: true).clean()
+assert(isolatedResult.removedBytes == 416)
+assert(!fm.fileExists(atPath: isolatedCaches.appendingPathComponent("dxmt").path))
+assert(!fm.fileExists(atPath: isolatedDocs.appendingPathComponent("shadercache").path))
 print("PASS: stale owned cache eviction, warm protection, temporary cleanup, unrelated/user/Steam data and symlink safety")
 '''
 with tempfile.TemporaryDirectory(prefix='madeira-cache-cleanup-') as tmp:

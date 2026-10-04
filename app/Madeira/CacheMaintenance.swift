@@ -20,6 +20,7 @@ struct OwnedCacheCleaner {
     let targetBytes: Int64
     var documents: URL? = nil
     var metalDriverCache: URL? = nil
+    var purgeShaderCaches = false
     let fm = FileManager.default
     private let keys: Set<URLResourceKey> = [.isSymbolicLinkKey, .isDirectoryKey, .isRegularFileKey,
                                              .fileSizeKey, .contentModificationDateKey]
@@ -105,7 +106,7 @@ struct OwnedCacheCleaner {
                     if name.range(of: "^[0-9a-f]{16}\\.(mdsc|mdxc)$", options: .regularExpression) != nil {
                         groups.append((file, info))
                     } else if name.range(of: "^[0-9a-f]{16}\\.(mdsc|mdxc)\\.tmp[0-9]+$", options: .regularExpression) != nil,
-                              now.timeIntervalSince(info.1) > 24 * 3600 {
+                              (purgeShaderCaches || now.timeIntervalSince(info.1) > 24 * 3600) {
                         if (try? fm.removeItem(at: file)) != nil { result.removedBytes += info.0 }
                         else { result.failedItems += 1 }
                     }
@@ -122,12 +123,24 @@ struct OwnedCacheCleaner {
         // it exceeds the budget. Deleting a warm shader DB hurts performance.
         for game in groups.sorted(by: { $0.info.1 < $1.info.1 }) {
             let recent = now.timeIntervalSince(game.info.1) <= 30 * 24 * 3600
-            if recent { result.protectedBytes += game.info.0; continue }
-            guard result.cacheBytes > targetBytes, safe(game.url) else { continue }
+            if recent && !purgeShaderCaches { result.protectedBytes += game.info.0; continue }
+            // A group containing links or unreadable entries is never recursively purged.
+            guard game.info.1 != .distantFuture, safe(game.url),
+                  purgeShaderCaches || result.cacheBytes > targetBytes else { continue }
             if (try? fm.removeItem(at: game.url)) != nil {
                 result.removedBytes += game.info.0
                 result.cacheBytes -= game.info.0
             } else { result.failedItems += 1 }
+        }
+        if purgeShaderCaches {
+            // Remove the visible folder only when no unrecognised/linked item remains.
+            var roots = [root]
+            if let documents { roots.append(documents.appendingPathComponent("shadercache", isDirectory: true)) }
+            for folder in roots where safe(folder) {
+                if let files = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil), files.isEmpty {
+                    do { try fm.removeItem(at: folder) } catch { result.failedItems += 1 }
+                }
+            }
         }
         return result
     }
@@ -163,7 +176,7 @@ enum CacheMaintenance {
             let message: String
             if !available { message = "Restart Madeira to clean caches safely." }
             else {
-                let result = clean()
+                let result = clean(purgeShaderCaches: true)
                 message = summary(result)
             }
             DispatchQueue.main.async { completion(message) }
@@ -177,7 +190,7 @@ enum CacheMaintenance {
         let failures = result.failedItems > 0 ? " \(result.failedItems) items could not be removed." : ""
         return cleanup + " " + shaders + driver + failures
     }
-    private static func clean() -> OwnedCacheCleaner.Result {
+    private static func clean(purgeShaderCaches: Bool = false) -> OwnedCacheCleaner.Result {
         let fm = FileManager.default
         let base = fm.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         let saved = UserDefaults.standard.integer(forKey: "madeiraCacheTargetMB")
@@ -186,8 +199,9 @@ enum CacheMaintenance {
         let driver = Bundle.main.bundleIdentifier.map { base.appendingPathComponent($0).appendingPathComponent("com.apple.metal") }
         let result = OwnedCacheCleaner(caches: base, temporary: fm.temporaryDirectory,
                                       now: Date(), targetBytes: Int64(mb) << 20,
-                                      documents: documents, metalDriverCache: driver).clean()
-        fputs("[cache-cleanup] removed=\(result.removedBytes) shader-cache=\(result.cacheBytes) protected-recent=\(result.protectedBytes) metal-driver=\(result.driverBytes) failures=\(result.failedItems) target=\(mb)MB\n", stderr)
+                                      documents: documents, metalDriverCache: driver,
+                                      purgeShaderCaches: purgeShaderCaches).clean()
+        fputs("[cache-cleanup] removed=\(result.removedBytes) shader-cache=\(result.cacheBytes) protected-recent=\(result.protectedBytes) metal-driver=\(result.driverBytes) failures=\(result.failedItems) target=\(mb)MB mode=\(purgeShaderCaches ? "manual-purge" : "automatic-soft")\n", stderr)
         return result
     }
 }
@@ -205,13 +219,13 @@ struct CacheStorageSettings: View {
                 Text("1 GB").tag(1024)
                 Text("2 GB").tag(2048)
             }
-            Button("Clean temporary & obsolete files") {
+            Button("Clear shader & temporary caches") {
                 cleaning = true
                 CacheMaintenance.manual { message = $0; cleaning = false }
             }.disabled(cleaning || !CacheMaintenance.available)
             if !message.isEmpty { Text(message).font(.caption).foregroundStyle(.secondary) }
         } header: { Text("Storage & caches") } footer: {
-            Text("Cleans leftover temporary files at startup. The shadercache folder stores compiled shaders for reuse. Shader caches unused for 30 days are removed only above the target; recent caches are kept even above it to avoid recompilation. The old fex-jit-dump.bin file was a diagnostic dump, not the running JIT, and is no longer generated automatically. Games, saves and Steam data are preserved. Restart Madeira after playing to clean safely.")
+            Text("Automatic cleanup keeps recently used shaders and removes old entries only above the target. The button clears generated shader caches, including recent DXMT and shadercache entries, plus leftover temporary files. The next game launch may compile shaders again. Games, saves and Steam data are preserved. Restart Madeira after playing to clear caches safely.")
         }
     }
 }

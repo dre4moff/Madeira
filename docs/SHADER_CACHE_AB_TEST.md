@@ -59,3 +59,11 @@ This validates the bypass, not on-device frame stability.
 
 The existing r30 public/personal IPAs remain available for returning to the
 control. No remote branch, tag or release is updated for this experiment.
+
+## Outcome and final r31
+
+The user reports no perceived improvement with the cache-disabled IPA. The new
+log confirms the off beacon and lacks persistent reader activity. This is a
+negative qualitative result, not a matched-route performance benchmark. r31
+restores normal cache defaults, fixes explicit manual purge of recent caches,
+and documents remaining movement stutters in R31_PERFORMANCE_REPORT.md.

@@ -2,14 +2,14 @@
 from pathlib import Path
 import tempfile,subprocess
 root=Path(__file__).resolve().parents[1]
-s=(root/'app/Madeira/CacheMaintenance.swift').read_text();a=s.index('enum CacheMaintenance {');b=s.index('    private static func clean()',a)
+s=(root/'app/Madeira/CacheMaintenance.swift').read_text();a=s.index('enum CacheMaintenance {');b=s.index('    private static func clean(',a)
 code=r'''
 import Foundation
 struct OwnedCacheCleaner {struct Result {var removedBytes:Int64=0;var cacheBytes:Int64=0;var protectedBytes:Int64=0;var driverBytes:Int64=0;var failedItems=0}}
 struct UserDefaults {static let standard=UserDefaults();func object(forKey:String)->Any? {nil}}
 let entered=DispatchSemaphore(value:0), releaseScan=DispatchSemaphore(value:0), launchedSignal=DispatchSemaphore(value:0)
 '''+s[a:b]+r'''
-    private static func clean() -> OwnedCacheCleaner.Result {
+    private static func clean(purgeShaderCaches: Bool = false) -> OwnedCacheCleaner.Result {
         entered.signal();assert(releaseScan.wait(timeout:.now()+3)==.success)
         return OwnedCacheCleaner.Result()
     }

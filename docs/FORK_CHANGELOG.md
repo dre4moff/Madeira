@@ -1,4 +1,4 @@
-# Complete fork changes — Madeira 0.1.3 / r30
+# Complete fork changes — Madeira 0.1.3 / r31
 
 This unofficial fork is based on Will Faust's official `v0.1.3`
 (`4e9d45a74294cd820120791c4b3f2b79adf4fc70`). Original copyright and licenses
@@ -6,6 +6,24 @@ are retained. Fork changes were prepared with AI assistance and are offered
 for inspection, not as an upstream endorsement or a guaranteed FPS increase.
 The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
+
+## r31 — Explicit shader cache purge and movement-stutter evidence
+
+- Fix the manual cache button: explicitly purge recent DXMT databases/custom
+  Metal artifacts and Files `shadercache` D3D12 entries, regardless of the soft
+  storage budget. Remove empty generated roots, retain foreign files and links,
+  and keep launch/cleanup serialization. Automatic cleanup still protects warm caches.
+- Restore normal shader cache defaults after the local cache-disabled A/B trial
+  produced no perceived improvement. Keep the existing explicit DXMT cache opt-out;
+  the native guard now skips path resolution, SQLite and custom Metal setup too.
+- Record cumulative dynamic-buffer releases, bytes and immediate fresh allocations
+  after a trim in the existing 64-frame log cadence, including when detailed
+  profiling is off. Preserve resource ownership, GPU fences and all pool policies.
+- Publish a sanitized performance report for developers: movement stutters remain
+  unresolved, footprint drops alone do not prove texture eviction, and the supplied
+  trial has no evidence justifying another speculative memory-policy change.
+- Optimized Release, build 16. 83 host suites; device FPS/rendering acceptance remains
+  separate. See [r31 report](R31_PERFORMANCE_REPORT.md).
 
 ## r30 — Restore batching and execute texture copies natively
 

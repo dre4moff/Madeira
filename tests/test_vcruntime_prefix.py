@@ -12,11 +12,15 @@ farms = source[start:end]
 start = re.search(r"            if \([^\n]*nativeVCRuntime\) \{", source[end:]).start() + end
 end = source.index("\n        }\n\n        // Build the launch path", start)
 overlay = source[start:end]
+a = source.index('static void madeira_link_wbem(')
+b = source.index('\n}', a) + 2
+wbem = source[a:b]
 harness = r'''
 #import <Foundation/Foundation.h>
 #include <assert.h>
 #include <stdio.h>
 #define LOG(...) ((void)0)
+''' + wbem + r'''
 static void stage(NSString *bundlePath, NSString *prefix, BOOL use_arm64ec, int nativeVCRuntime) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *sys32Dir = [prefix stringByAppendingPathComponent:@"drive_c/windows/system32"];

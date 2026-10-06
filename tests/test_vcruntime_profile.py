@@ -1,3 +1,4 @@
+from library_host_fixture import resolution_choices
 """Host-only tests of the real LibraryEntry stored fields; never starts Wine."""
 from pathlib import Path
 import subprocess
@@ -36,6 +37,8 @@ let off = try decoder.decode(LibraryEntry.self, from: encoder.encode(first))
 assert(off.nativeVCRuntime == false)
 print("PASS: old library compatibility, persistence, per-game isolation and disabling")
 '''
+test = resolution_choices() + test
+
 with tempfile.TemporaryDirectory(prefix="madeira-profile-test-") as tmp:
     path = Path(tmp) / "main.swift"
     path.write_text(test)

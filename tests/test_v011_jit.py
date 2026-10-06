@@ -7,11 +7,12 @@ root = Path(__file__).resolve().parents[1]
 source = (root / 'app/Madeira/StikJITHelper.swift').read_text()
 start = source.index('    static var ready: Bool')
 ready = source[start:source.index('    /// Allocate a JIT memory pool', start)]
-start = source.index('        if kr1 == KERN_NO_SPACE && MadeiraConfig.flag("MADEIRA_RW_ALIAS_RETRY")')
+start = source.index('        var kr1: kern_return_t = KERN_NO_SPACE')
 retry = source[start:source.index('        guard kr1 == KERN_SUCCESS else', start)]
 program = r'''
 import Foundation
 var debugged = false, attached = false
+struct SigningStatus { static var current: SigningStatus { SigningStatus() }; var debugged: Bool { jit_check_debugged() } }
 func jit_check_debugged() -> Bool { debugged }
 enum Policy {
     static var attachCheck = true, poolTaken = false
@@ -27,17 +28,18 @@ for flag in [false, true] { for attach in [false, true] { for taken in [false, t
 }}}
 typealias vm_address_t = UInt
 typealias vm_size_t = UInt
+typealias kern_return_t = Int
 let mach_task_self_: UInt = 1
 let KERN_NO_SPACE = 3, KERN_SUCCESS = 0, VM_FLAGS_ANYWHERE = 1, VM_INHERIT_NONE = 2
-var calls = 0, nextResult = 0
+var hints: [UInt] = [], results: [Int] = []
 func vm_remap(_ task: UInt, _ address: inout UInt, _ size: UInt, _ mask: Int,
               _ flags: Int, _ sourceTask: UInt, _ source: UInt, _ copy: Int,
               _ current: inout Int, _ maximum: inout Int, _ inherit: Int) -> Int {
-    assert(address == 0 && size == UInt(896 << 20) && source == 0x140000000)
+    assert(size == UInt(896 << 20) && source == 0x140000000)
     assert(copy == 0 && flags == VM_FLAGS_ANYWHERE)
-    calls += 1
-    if nextResult == 0 { address = 0x190000000 }
-    return nextResult
+    let result = results[hints.count]; hints.append(address)
+    if result == 0 { address = 0x500000000 }
+    return result
 }
 enum MadeiraConfig {
     static var enabled = true
@@ -48,21 +50,24 @@ struct LogStore {
     static let shared = LogStore()
     func log(_ value: String, level: Level) {}
 }
-func allocate(_ initial: Int) -> (Int, UInt) {
-    var kr1 = initial, rwAddr: UInt = 0x7000000000, curProt = 0, maxProt = 0
-    let rxPtr = UnsafeMutableRawPointer(bitPattern: 0x140000000)!
+func allocate() -> (Int, UInt) {
+    var rwAddr: UInt = 0, curProt = 0, maxProt = 0
+    let rxAddrV: UInt = 0x140000000
+    let rxPtr = UnsafeMutableRawPointer(bitPattern: rxAddrV)!
     let poolSize = 896 << 20
 ''' + retry + r'''
     return (kr1, rwAddr)
 }
-for initial in [0, 3, 5] { for enabled in [false, true] { for result in [0, 3, 5] {
-    MadeiraConfig.enabled = enabled; nextResult = result; calls = 0
-    let actual = allocate(initial), retries = initial == 3 && enabled
-    assert(calls == (retries ? 1 : 0))
-    assert(actual.0 == (retries ? result : initial))
-    assert(actual.1 == (retries ? (result == 0 ? 0x190000000 : 0) : 0x7000000000))
-}}}
-print("PASS: v0.1.1 debugger readiness, pool retention, full-size alias retry, opt-out and kernel failure")
+for enabled in [false, true] { for first in [0, 3, 5] { for second in [0, 3, 5] { for third in [0, 3, 5] {
+    MadeiraConfig.enabled = enabled; results = [first, second, third]; hints = []
+    let actual = allocate()
+    let count = !enabled || first != 3 ? 1 : second != 3 ? 2 : 3
+    let expected: [UInt] = [0x7000000000, 0x140000000 + UInt(896 << 20), 0]
+    assert(hints == Array(expected.prefix(count)))
+    assert(actual.0 == results[count - 1])
+    if actual.0 == 0 { assert(actual.1 == 0x500000000) }
+}}}}
+print("PASS: debugger readiness, pool retention, high/above-RX/kernel alias placement, opt-out and all 54 kernel-result scenarios")
 '''
 with tempfile.TemporaryDirectory(prefix='madeira-v011-jit-') as tmp:
     path = Path(tmp) / 'main.swift'

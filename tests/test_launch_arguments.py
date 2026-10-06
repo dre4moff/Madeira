@@ -1,3 +1,4 @@
+from library_host_fixture import resolution_choices
 """Host-only tests of production profile, argv and Steam/Dock argument paths."""
 from pathlib import Path
 import json
@@ -132,13 +133,13 @@ static int WideCharToMultiByte(unsigned cp,unsigned flags,const wchar_t *in,int 
 typedef uint64_t (*launch_fn)(void*,const uint64_t*,uint32_t,int32_t,const char*);
 static const char *expected;static unsigned submitted;
 static uint64_t fake_launch(void *manager,const uint64_t *gameid,uint32_t source,int32_t option,const char *args){
-    assert(manager&&*gameid==457140&&source==0&&option==0&&!strcmp(args,expected));submitted++;return 42;
+    assert(manager&&*gameid==457140&&source==7&&option==0&&!strcmp(args,expected));submitted++;return 42;
 }
 static void exercise(const wchar_t *setting,const wchar_t *dx11,const char *wanted){
     custom=setting;flag=dx11;expected=wanted;submitted=0;
     char user_args[4096];assert(read_user_args(user_args,sizeof user_args));
     void *vtable[]={NULL,NULL,(void*)fake_launch};void **vptr=vtable;void *manager=&vptr;
-    uint64_t gameid=457140;
+    uint32_t launch_option=7; uint64_t gameid=457140;
 ''' + '    uint64_t call = '+calls[0]+';\n    call = '+calls[1]+r''';
     assert(call==42&&submitted==2);
 }
@@ -153,6 +154,8 @@ int main(void){
     puts("PASS: Dock actual initial/retry LaunchApp forwards user args; legacy fallback, empty/reset, oversize/conversion fail closed");
 }
 '''
+swift = resolution_choices() + swift
+
 with tempfile.TemporaryDirectory(prefix='madeira-launch-arguments-') as folder:
     p=Path(folder);(p/'main.swift').write_text(swift);(p/'corpus.json').write_text(json.dumps(corpus))
     results=subprocess.check_output(['swift',str(p/'main.swift'),str(p/'corpus.json')],text=True).splitlines()

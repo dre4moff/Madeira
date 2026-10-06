@@ -6,6 +6,9 @@ root = Path(__file__).resolve().parents[1]
 s = (root / 'build/ntdll-unix/virtual_ios.c').read_text()
 a = s.index('static int ios_alloc_ec_code;')
 policy = s[a:s.index('static inline int mprotect_exec(', a)]
+b = policy.index('/* ml1279:')
+e = policy.index('static int ios_guest_anon_rwx_is_host_data', b)
+policy = policy[:b] + policy[e:]
 a = s.index('static int ios_cage_release_on_exhaustion(')
 cage = s[a:s.index('static ULONG_PTR ios_wow_window_pick(', a)]
 code = r'''
@@ -30,6 +33,10 @@ static int is_view_valloc(const struct file_view *v){return !(v->protect&(SEC_FI
 static struct file_view *find_view(const void *p,size_t n){
  (void)n;for(unsigned i=0;i<4;i++)if((uintptr_t)p>=(uintptr_t)views[i].base && (uintptr_t)p<(uintptr_t)views[i].base+views[i].size)return &views[i];return NULL;
 }
+struct ios_wow_window { uintptr_t base; };
+#define IOS_WOW_WINDOW_SIZE 0x80000000ULL
+static struct ios_wow_window *ios_wow_rwx_plain_window(const void *p){(void)p;return NULL;}
+static int ios_wow_rwx_view_ok(const struct file_view *p){(void)p;return 0;}
 static int arm64ec_view=1,alias;
 void *ios_jit_rx_base_global=(void*)0x119000000ULL;
 size_t ios_jit_pool_size_global=0x8000000;

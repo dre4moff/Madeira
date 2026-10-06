@@ -1,14 +1,14 @@
 # Fork release and personal runtime setup
 
-Release: `v0.1.3-fork-r31`, based on official Madeira `v0.1.3`. This is an
+Release: `v0.1.3-fork-r32`, based on official Madeira `v0.1.3` plus every upstream `main` change through `48f9764`. This is an
 unofficial, experimental prerelease. The app is optimized Release (`-O2` native,
-`-O` whole-module Swift), build 16, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
+`-O` whole-module Swift), build 17, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
 Manual cache cleanup, the negative cache-disabled trial and remaining movement stutters are explained in [the developer report](R31_PERFORMANCE_REPORT.md).
 The public IPA is unsigned; it needs personal signing/sideloading and JIT.
 
 ## Install
 
-1. Download `Madeira-0.1.3-Fork-r31-Release-unsigned.ipa` from
+1. Download `Madeira-0.1.3-Fork-r32-Release-unsigned.ipa` from
    [this fork's releases](https://github.com/dre4moff/Madeira/releases).
 2. For games needing Microsoft native VC++ runtime, first prepare your personal
    IPA as below. Microsoft binaries are deliberately absent from public assets.
@@ -40,9 +40,9 @@ Run on macOS with Python 3:
 
 ```sh
 python3 tools/prepare-vcruntime-ipa.py \
-  --ipa /path/to/Madeira-0.1.3-Fork-r31-Release-unsigned.ipa \
+  --ipa /path/to/Madeira-0.1.3-Fork-r32-Release-unsigned.ipa \
   --runtime-dir /path/to/your/unmodified-x64-runtime \
-  --output /path/to/Madeira-r31-personal-unsigned.ipa
+  --output /path/to/Madeira-r32-personal-unsigned.ipa
 ```
 
 The helper checks x64 PE headers and intact certificate ranges, preserves DLL
@@ -55,7 +55,7 @@ about app extensions; built-in JIT requires it. See [JIT setup](JIT.md). These p
 ## Source and rebuilding
 
 ```sh
-git clone --recurse-submodules --branch v0.1.3-fork-r31 \
+git clone --recurse-submodules --branch v0.1.3-fork-r32 \
   https://github.com/dre4moff/Madeira.git
 ```
 
@@ -102,11 +102,12 @@ The release's verification manifest contains the public asset digest, native
 UUID, unsigned Mach-O inspection, original FEX identities, resource comparison,
 optimization evidence and tests. Native and dSYM UUIDs match.
 See the current `verification.json` and `dwarfdump --uuid` output; symbols remain outside the IPA.
-r31 retains official 0.1.3 and all retained fork fixes. The native archives match
-r30 except for the cache entry-point opt-out guard (`cache.o`); 1,057 other DXMT
-objects, native Wine/thread handling and the shader converter identity are
-preserved. Only the ARM64EC D3D11 renderer gains bounded recycling counters.
-See [r31 performance evidence and open issues](R31_PERFORMANCE_REPORT.md).
+r32 merges all 207 previously missing upstream commits and the new original
+Wine, DXMT, FEX and Dock pins. It preserves the fork changes, including custom
+arguments, VC runtime and DX11 controls, DLSS/MetalFX, real microphone, worker
+context/fullscreen fixes and cache maintenance. The Release contains the pinned
+Wine Mono 11.0.0 runtime and the original hash-checked mscorlib patch; its matching
+source is supplied separately. See [r32 integration and checks](R32_UPSTREAM_SYNC.md).
 
 The manual **Clear shader & temporary caches** button now clears recent DXMT
 and Files `shadercache` entries regardless of the automatic cleanup budget.

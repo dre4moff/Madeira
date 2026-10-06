@@ -65,7 +65,7 @@ int main(void){
 }
 '''
 # Reproduce the pre-fix defect using the actual baseline classifier.
-old = subprocess.check_output(['git','show','HEAD:build/wineserver/fd_ios.c'],cwd=root,text=True)
+old = subprocess.check_output(['git','show','8263076d0c815d2dc47de3cc585d803da4f68012^:build/wineserver/fd_ios.c'],cwd=root,text=True)
 a=old.index('static signed char ios_fd_is_inet(');b=old.index('\nvoid main_loop(void)',a)
 regression='''
 #include <assert.h>

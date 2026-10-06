@@ -15,7 +15,7 @@ fixture=r'''
 #include "launch.h"
 static uint64_t clock_ms;
 static int online_mode, reports, phases, released, launched, callbacks;
-static void *user_methods[183],*engine_methods[9];
+static void *user_methods[216],*engine_methods[9];
 static void **user_object=user_methods,**engine_object=engine_methods;
 bool dock_method_is(uintptr_t m,void *o,unsigned slot,uintptr_t rva){(void)m;(void)o;(void)slot;(void)rva;return true;}
 DWORD GetEnvironmentVariableW(const wchar_t *name,wchar_t *value,DWORD cap){(void)name;(void)value;(void)cap;return 0;}
@@ -28,6 +28,7 @@ static int32_t logon(void *o,uint64_t id){(void)o;assert(id==76561197960265729UL
 static bool private_online(void *o){(void)o;assert(online_mode);return true;}
 static bool connected(void *o){(void)o;assert(online_mode);return true;}
 static bool subscribed(void *o,uint32_t app){(void)o;(void)app;return true;}
+static int32_t can_offline(void *o){(void)o;return 0;}
 static int32_t subscriptions(void *o,uint32_t *apps,int32_t count,bool all){(void)o;assert(count==65536&&all);apps[0]=42;return 1;}
 int sh_launch(HMODULE m,void *e,void *u,const struct sh_api *api,const struct sh_observer *obs,int32_t p,int32_t h,uint64_t id,uint32_t app,const struct dock_client_layout *l){(void)m;(void)e;(void)u;(void)api;(void)obs;(void)p;(void)h;(void)id;(void)l;assert(online_mode&&app==42);launched++;return 0;}
 static int32_t create(int32_t *pipe){*pipe=2;return 1;}
@@ -49,6 +50,7 @@ int main(void){
  setenv("MADEIRA_STEAM_HOST_STEAMID","76561197960265729",1);setenv("MADEIRA_STEAM_HOST_APPID","42",1);setenv("MADEIRA_STEAM_HOST_LAUNCH","1",1);
  engine_methods[8]=(void *)get_user;user_methods[1]=(void *)logon;user_methods[4]=(void *)private_online;user_methods[6]=(void *)connected;
  user_methods[49]=(void *)cached;user_methods[50]=(void *)selected;user_methods[181]=(void *)subscribed;user_methods[182]=(void *)subscriptions;
+ user_methods[214]=(void *)can_offline;
  struct dock_client_layout layout={0};struct sh_api api={create,release_user,release_pipe,get_callback,free_callback,public_online};struct sh_observer obs={now,sleep_ms,event};
  clock_ms=100;assert(sh_session(NULL,&engine_object,&api,&obs,&layout)==34);
  assert(clock_ms==90100&&reports==9&&phases==27&&released==2&&!launched);

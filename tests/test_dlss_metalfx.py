@@ -125,10 +125,17 @@ int main(){
  assert(strstr(getenv("WINEDLLOVERRIDES"),";nvapi64,nvngx=b"));
  assert(!strcmp(getenv("DXMT_METALFX_SPATIAL_SWAPCHAIN"),"0"));
  madeira_apply_dlss_profile(0);
- assert(!strcmp(getenv("WINEDLLOVERRIDES"),base));assert(!strcmp(getenv("DXMT_ENABLE_NVEXT"),"0"));
+ assert(!strcmp(getenv("WINEDLLOVERRIDES"),base));assert(!getenv("DXMT_ENABLE_NVEXT"));
  assert(!strcmp(getenv("DXMT_CONFIG"),"untouched"));
  madeira_apply_dlss_profile(1);setenv("WINEDLLOVERRIDES","new-user-choice=n",1);
  madeira_apply_dlss_profile(0);assert(!strcmp(getenv("WINEDLLOVERRIDES"),"new-user-choice=n"));
+ // The original NVIDIA report/spatial upscale options survive an off profile.
+ setenv("DXMT_ENABLE_NVEXT","1",1);setenv("DXMT_METALFX_SPATIAL_SWAPCHAIN","1",1);
+ madeira_apply_dlss_profile(0);
+ assert(!strcmp(getenv("DXMT_ENABLE_NVEXT"),"1"));
+ assert(!strcmp(getenv("DXMT_METALFX_SPATIAL_SWAPCHAIN"),"1"));
+ madeira_apply_dlss_profile(1);assert(!strcmp(getenv("DXMT_METALFX_SPATIAL_SWAPCHAIN"),"0"));
+ madeira_apply_dlss_profile(0);assert(!strcmp(getenv("DXMT_ENABLE_NVEXT"),"1"));
  puts("PASS: per-game DLSS opt-in, unrelated overrides preserved, off restores baseline, no double upscaling");
 }
 '''

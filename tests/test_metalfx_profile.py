@@ -1,3 +1,4 @@
+from library_host_fixture import resolution_choices, control_action
 """Actual saved-profile sizing and renderer settings; host-only fixtures."""
 from pathlib import Path
 import subprocess,tempfile
@@ -5,7 +6,7 @@ root=Path(__file__).resolve().parents[1]
 s=(root/'app/Madeira/Library.swift').read_text()
 helper=s[s.index('enum LibraryMetalFX {'):s.index('\nstruct LibraryEntry:')]
 fields=s[s.index('struct LibraryEntry:'):s.index('    var displayMode: DisplayMode')]
-swift='import Foundation\nstruct TouchControl: Codable {}\n'+helper+fields+'}\n'+r'''
+swift='import Foundation\nstruct TouchControl: Codable {}\n'+control_action()+helper+fields+'}\n'+r'''
 let size = LibraryMetalFX.renderResolution
 assert(size("1408x648", "balanced", true) == "1408x648")
 assert(size("1408x648", "performance", true) == "1408x648")
@@ -15,6 +16,7 @@ assert(size("640x480", "performance", true) == "640x480")
 assert(size("320x240", "performance", true) == "320x240")
 assert(size("bad", "balanced", true) == "bad")
 var game = LibraryEntry(title: "RV", relativePath: "Ride.exe", bits: 64)
+game.resolution = "1408x648"
 let other = game
 assert(game.metalFX == nil)
 game.metalFX = "performance"
@@ -43,6 +45,8 @@ int main(void) {
  puts("PASS: per-game bridge precedence/reset, invalid choices and unrelated DXMT settings");
 }
 '''
+swift = resolution_choices() + swift
+
 with tempfile.TemporaryDirectory(prefix='madeira-metalfx-') as tmp:
  p=Path(tmp);(p/'main.swift').write_text(swift);(p/'profile.c').write_text(c)
  subprocess.run(['swift',str(p/'main.swift')],check=True)

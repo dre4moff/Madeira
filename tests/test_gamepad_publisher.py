@@ -15,21 +15,39 @@ final class GCControllerButtonInput { var isPressed = false; var value: Float = 
 final class Axis { var value: Float = 0 }
 final class Stick { let xAxis = Axis(), yAxis = Axis() }
 final class Dpad { let up = GCControllerButtonInput(), down = GCControllerButtonInput(), left = GCControllerButtonInput(), right = GCControllerButtonInput() }
-final class GCExtendedGamepad: @unchecked Sendable {
+class GCExtendedGamepad: @unchecked Sendable {
  let dpad = Dpad(), leftThumbstick = Stick(), rightThumbstick = Stick()
  let leftTrigger = GCControllerButtonInput(), rightTrigger = GCControllerButtonInput()
  let leftShoulder = GCControllerButtonInput(), rightShoulder = GCControllerButtonInput()
  let buttonA = GCControllerButtonInput(), buttonB = GCControllerButtonInput(), buttonX = GCControllerButtonInput(), buttonY = GCControllerButtonInput()
  let buttonMenu: GCControllerButtonInput? = GCControllerButtonInput(), buttonOptions: GCControllerButtonInput? = GCControllerButtonInput(), buttonHome: GCControllerButtonInput? = GCControllerButtonInput()
  let leftThumbstickButton: GCControllerButtonInput? = GCControllerButtonInput(), rightThumbstickButton: GCControllerButtonInput? = GCControllerButtonInput()
+ var controller: GCController?
  var valueChangedHandler: ((GCExtendedGamepad, GCControllerButtonInput) -> Void)?
 }
 final class GCController: @unchecked Sendable {
  static var devices: [GCController] = []
  static func controllers() -> [GCController] { devices }
+ var vendorName: String? = "Synthetic pad", productCategory = "Synthetic"
+ var battery: Battery?
  var handlerQueue: DispatchQueue?
  var extendedGamepad: GCExtendedGamepad? = GCExtendedGamepad()
 }
+final class GCDualSenseGamepad: GCExtendedGamepad {let touchpadButton = GCControllerButtonInput()}
+final class GCDualShockGamepad: GCExtendedGamepad {let touchpadButton = GCControllerButtonInput()}
+struct Battery {enum State {case unknown, charging, full, discharging}; var batteryLevel: Float = 1; var batteryState = State.full}
+let WINIOS_HIDPAD_BATTERY_UNKNOWN: UInt32 = 255
+let WINIOS_HIDPAD_L2: UInt32 = 1 << 16, WINIOS_HIDPAD_R2: UInt32 = 1 << 17, WINIOS_HIDPAD_TOUCHPAD: UInt32 = 1 << 18
+struct winios_hidpad {
+ var connected: UInt32 = 0, buttons: UInt32 = 0
+ var lx: Int16 = 0, ly: Int16 = 0, rx: Int16 = 0, ry: Int16 = 0
+ var left_trigger: UInt8 = 0, right_trigger: UInt8 = 0, battery: UInt8 = 255, charging: UInt8 = 0
+}
+func winios_hidpad_set_state(_ p: UnsafePointer<winios_hidpad>?) {}
+func winios_gamepad_set_vibration(_ slot: Int32, _ left: UInt16, _ right: UInt16) {}
+func madeira_pad_output_configure(_ xinput: Int32, _ hid: Int32) {}
+func madeira_pad_output_set_slot(_ slot: Int32, _ controller: GCController?) {}
+func madeira_pad_output_set_active(_ on: Int32) {}
 extension Notification.Name {
  static let GCControllerDidConnect = Notification.Name("connected")
  static let GCControllerDidDisconnect = Notification.Name("disconnected")

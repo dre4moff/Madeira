@@ -63,6 +63,7 @@
 #ifdef WINE_IOS
 #include <pthread.h>
 #include <setjmp.h>
+#include <sys/stat.h>
 #endif
 
 #include "ntstatus.h"
@@ -422,7 +423,95 @@ struct ios_child_args {
     char **argv;
     int argc;
     struct pe_image_info pe_info;
+    int slot;   /* ios_child_slots index, -1 = none */
 };
+
+/* Pseudo-process children that are still running. A launcher stub that
+ * starts the game and exits at once (GTA V Enhanced: PlayGTAV.exe starts
+ * GTA5_Enhanced.exe and exits ~1 s later) ended the whole session: the main
+ * process's exit stops the wineserver, and the game died loading.
+ * WineProcessBridge asks madeira_live_game_children() after the main process
+ * exits and keeps the session while such a child runs. Crash reporters and
+ * helpers (crs-handler, crashpad, *helper*, *report*) do not count: they live
+ * as long as the game and used to end with it. */
+#define IOS_CHILD_SLOTS 32
+static pthread_mutex_t ios_child_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct { char name[64]; double started; int used; } ios_child_slots[IOS_CHILD_SLOTS];
+
+static double ios_child_now(void)
+{
+    struct timespec ts;
+    clock_gettime( CLOCK_MONOTONIC, &ts );
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+static int ios_child_is_helper( const char *name )
+{
+    static const char *const parts[] = { "crash", "crs-handler", "handler", "report", "helper" };
+    unsigned i;
+    for (i = 0; i < ARRAY_SIZE(parts); i++) if (strstr( name, parts[i] )) return 1;
+    return 0;
+}
+
+static int ios_child_slot_take( const UNICODE_STRING *image )
+{
+    char name[64];
+    unsigned i, n = 0, start = 0, len = image->Length / sizeof(WCHAR);
+    int slot = -1;
+
+    for (i = 0; i < len; i++) if (image->Buffer[i] == '\\' || image->Buffer[i] == '/') start = i + 1;
+    for (i = start; i < len && n < sizeof(name) - 1; i++)
+    {
+        WCHAR c = image->Buffer[i];
+        name[n++] = (c >= 'A' && c <= 'Z') ? c + 32 : (c >= 32 && c < 127) ? c : '?';
+    }
+    if (!n) name[n++] = '?';
+    name[n] = 0;
+    pthread_mutex_lock( &ios_child_lock );
+    for (i = 0; i < IOS_CHILD_SLOTS; i++)
+    {
+        if (ios_child_slots[i].used) continue;
+        ios_child_slots[i].used = 1;
+        ios_child_slots[i].started = ios_child_now();
+        memcpy( ios_child_slots[i].name, name, n + 1 );
+        slot = i;
+        break;
+    }
+    pthread_mutex_unlock( &ios_child_lock );
+    return slot;
+}
+
+static void ios_child_slot_release( int slot )
+{
+    if (slot < 0 || slot >= IOS_CHILD_SLOTS) return;
+    pthread_mutex_lock( &ios_child_lock );
+    ios_child_slots[slot].used = 0;
+    pthread_mutex_unlock( &ios_child_lock );
+}
+
+/* Children still running that are not helpers, started at most max_age
+ * seconds ago (max_age < 0: any age); their names go to buf. Called by
+ * WineProcessBridge.m (same binary). */
+int madeira_live_game_children( char *buf, int len, double max_age )
+{
+    double now = ios_child_now();
+    int count = 0, used = 0;
+    unsigned i;
+
+    if (buf && len > 0) buf[0] = 0;
+    pthread_mutex_lock( &ios_child_lock );
+    for (i = 0; i < IOS_CHILD_SLOTS; i++)
+    {
+        if (!ios_child_slots[i].used || ios_child_is_helper( ios_child_slots[i].name )) continue;
+        if (max_age >= 0 && now - ios_child_slots[i].started > max_age) continue;
+        count++;
+        if (buf && len - used > 1)
+            used += snprintf( buf + used, len - used, "%s%s", used ? " " : "", ios_child_slots[i].name );
+        if (used >= len) used = len - 1;
+    }
+    pthread_mutex_unlock( &ios_child_lock );
+    return count;
+}
 
 /* the machine of the child's main image, published to
  * wine_ios_child_main so it can reserve the child's [B, B+4G) guest window
@@ -472,6 +561,10 @@ static void *ios_child_thread_entry( void *arg )
     } else {
         dprintf(STDERR_FILENO, "[Wine child thread] child exited with code %d\n", wine_ios_exit_code);
     }
+    {   /* ml1213: never leave the child-boot lock held by a dead boot */
+        extern void ios_child_boot_unlock( void );
+        ios_child_boot_unlock();
+    }
 
     dprintf(STDERR_FILENO, "[Wine child thread] thread exiting cleanly\n");
     /* the pseudo-process is over — give its guest window
@@ -486,6 +579,7 @@ static void *ios_child_thread_entry( void *arg )
      * back to the slot is the owner-thread match in ios_wow_slot_current().
      * It is a no-op once the window has been released. */
     ios_wow_window_release_current();
+    ios_child_slot_release( args->slot );
     free( args->argv );
     free( args );
 
@@ -532,6 +626,7 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
     args->argv = argv;
     args->argc = argc;
     args->pe_info = *pe_info;
+    args->slot = ios_child_slot_take( &params->ImagePathName );
 
     if (winedebug) putenv( winedebug );
 
@@ -541,6 +636,7 @@ static NTSTATUS spawn_process( const RTL_USER_PROCESS_PARAMETERS *params, int so
     ret = pthread_create( &child_thread, NULL, ios_child_thread_entry, args );
     if (ret) {
         ERR("spawn_process: pthread_create failed: %d\n", ret);
+        ios_child_slot_release( args->slot );
         free( argv );
         free( args );
         return STATUS_NO_MEMORY;
@@ -838,6 +934,112 @@ static NTSTATUS alloc_handle_list( const PS_ATTRIBUTE *handles_attr, obj_handle_
     return STATUS_SUCCESS;
 }
 
+#ifdef WINE_IOS
+/* Is the file name of `image` (any directory) `name`, a lower-case ASCII name? */
+static int ios_image_name_is( const WCHAR *image, int image_len, const char *name )
+{
+    int n = (int)strlen( name ), base = 0, k;
+
+    if (!image || image_len <= 0) return 0;
+    for (k = 0; k < image_len; k++) if (image[k] == '\\' || image[k] == '/') base = k + 1;
+    if (image_len - base != n) return 0;
+    for (k = 0; k < n; k++)
+    {
+        WCHAR c = image[base + k];
+        if (c >= 'A' && c <= 'Z') c += 32;
+        if (c != (WCHAR)name[k]) return 0;
+    }
+    return 1;
+}
+
+/* conhost.exe in an ARM64EC session. Wine's conhost.exe is a native aarch64
+ * image, but the session's ARM64EC ntdll loads the emulator into it all the
+ * same, while its threads get no CHPE CPU area (init_thread_stack: "NOT
+ * setting cpu_area"). The emulator's memory notifications read through that
+ * area, so conhost's first executable allocation faults at 0x38, and its
+ * exception path faults again forever, taking the whole app down. GTA V
+ * Enhanced: SocialClubHelper.exe's AllocConsole (Chromium routing stdio to a
+ * console) killed the app 33 s in. Refused, AllocConsole just fails and the
+ * caller goes on without a console. aarch64 sessions are not affected.
+ * MADEIRA_EC_CONHOST=1 starts it anyway. */
+static int ec_conhost_refuse( int arm64ec_session, const char *env, const WCHAR *image, int image_len )
+{
+    return arm64ec_session && !(env && env[0] == '1') && ios_image_name_is( image, image_len, "conhost.exe" );
+}
+
+/* A Steam game's session log under its own name.
+ *
+ * The app keeps each run's log as Documents/logs/<exe>-<yyyy-MM-dd_HH-mm-ss>.txt
+ * (LogStore.startSessionLog, a hard link to madeira-log.txt), but only knows
+ * the exe when it starts the program itself. A Steam game started through
+ * Madeira Dock runs explorer.exe first and Valve's client starts the game's
+ * program later, so its runs had no such file. When a process whose image lies
+ * under steamapps\common\ starts, link the log under that exe's name too, once
+ * per exe name. */
+static void madeira_steam_session_log( const UNICODE_STRING *image )
+{
+    static const char marker[] = "\\steamapps\\common\\";
+    static pthread_mutex_t done_lock = PTHREAD_MUTEX_INITIALIZER;
+    static char done[8][64];
+    static unsigned ndone;
+    const WCHAR *ip = image->Buffer;
+    int len = image->Length / sizeof(WCHAR), ml = sizeof(marker) - 1, k, j, base = 0, found = 0, seen = 0;
+    const char *docs = getenv( "MADEIRA_DOCS_DIR" );
+    char name[64], src[1024], dir[1024], dst[1200], stamp[32];
+    unsigned n = 0, i;
+    time_t now;
+    struct tm tmv;
+
+    if (!ip || !docs || !*docs) return;
+    for (k = 0; k + ml <= len && !found; k++)
+    {
+        for (j = 0; j < ml; j++)
+        {
+            WCHAR c = ip[k + j];
+            if (c >= 'A' && c <= 'Z') c += 32;
+            if (c != (WCHAR)marker[j]) break;
+        }
+        if (j == ml) found = 1;
+    }
+    if (!found) return;
+    for (k = 0; k < len; k++) if (ip[k] == '\\' || ip[k] == '/') base = k + 1;
+    for (k = base; k < len && n < sizeof(name) - 1; k++)
+    {
+        WCHAR c = ip[k];
+        name[n++] = (c < 0x20 || c > 0x7e || strchr( "/\\:*?\"<>|", (char)c )) ? '_' : (char)c;
+    }
+    name[n] = 0;
+    if (!n) return;
+    /* Helpers a game spawns (a shader compiler such as fxc.exe, installers,
+     * crash reporters) are not the game. */
+    {
+        static const char * const helpers[] = { "fxc", "redist", "dxsetup", "crash", "setup", "install" };
+        char lower[64];
+        for (i = 0; i <= n; i++) lower[i] = (name[i] >= 'A' && name[i] <= 'Z') ? name[i] + 32 : name[i];
+        for (i = 0; i < sizeof(helpers) / sizeof(helpers[0]); i++) if (strstr( lower, helpers[i] )) return;
+    }
+    pthread_mutex_lock( &done_lock );
+    for (i = 0; i < ndone && !seen; i++) if (!strcmp( done[i], name )) seen = 1;
+    /* A full table counts as seen: otherwise every later spawn would link again. */
+    if (!seen) { if (ndone < sizeof(done) / sizeof(done[0])) strcpy( done[ndone++], name ); else seen = 1; }
+    pthread_mutex_unlock( &done_lock );
+    if (seen) return;
+
+    now = time( NULL );
+    localtime_r( &now, &tmv );
+    strftime( stamp, sizeof(stamp), "%Y-%m-%d_%H-%M-%S", &tmv );
+    snprintf( src, sizeof(src), "%s/madeira-log.txt", docs );
+    snprintf( dir, sizeof(dir), "%s/logs", docs );
+    mkdir( dir, 0755 );
+    snprintf( dst, sizeof(dst), "%s/%s-%s.txt", dir, name, stamp );
+    if (link( src, dst ) == 0)
+        dprintf( 2, "[session-log] Steam game %s: logs/%s-%s.txt\n", name, name, stamp );
+    else
+        dprintf( 2, "[session-log] Steam game %s: could not link logs/%s-%s.txt (errno %d)\n",
+                 name, name, stamp, errno );
+}
+#endif
+
 /**********************************************************************
  *           NtCreateUserProcess  (NTDLL.@)
  */
@@ -1016,6 +1218,17 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         }
     }
 
+    /* conhost.exe is refused in an ARM64EC session, where it would crash the app (see
+     * ec_conhost_refuse); MADEIRA_EC_CONHOST=1 starts it anyway. */
+    if (ec_conhost_refuse( is_arm64ec(), getenv( "MADEIRA_EC_CONHOST" ), params->ImagePathName.Buffer,
+                           params->ImagePathName.Length / sizeof(WCHAR) ))
+    {
+        dprintf(2, "[proc-gate] REFUSING spawn of %s (conhost in an ARM64EC session: it is aarch64 and "
+                "its threads have no CPU area for the emulator loaded into it; env.MADEIRA_EC_CONHOST=1 "
+                "starts it)\n", debugstr_us( &params->ImagePathName ));
+        return STATUS_ACCESS_DENIED;
+    }
+
     /* ml526: stamp every accepted spawn on the startup timeline. This is the
      * boundary the coarse phase accounting could not see — steam.exe -> the
      * webhelper spawn was a ~16s block with no internal detail. */
@@ -1025,6 +1238,7 @@ NTSTATUS WINAPI NtCreateUserProcess( HANDLE *process_handle_ptr, HANDLE *thread_
         snprintf( pbuf, sizeof(pbuf), "spawn:%s", debugstr_us( &params->ImagePathName ) );
         winios_phase( pbuf );
     }
+    madeira_steam_session_log( &params->ImagePathName );
 
     /* task #34 single-process CEF: the 64GB VA window above the GPU carveout
      * can hold exactly ONE CEF instance's PartitionAlloc pools + one V8

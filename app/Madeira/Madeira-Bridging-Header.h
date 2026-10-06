@@ -6,6 +6,8 @@
 #import "IOSDisplayShim.h"
 #import "Winios/Winios.h"
 #import "Winios/WiniosCursor.h"
+// ml2106: rumble / DualSense output to the physical pad (PadOutput.m)
+#import "PadOutput.h"
 // Steam content decoders (liblzma shim, zstd decoder, zip chunks), used by the owned library's downloads.
 #import "SwiftSteam/lzma_shim.h"
 // On-device remote pairing for Built-in StikJIT (build/rppairing-ios, JITPairing.swift).
@@ -23,6 +25,11 @@ void wine_set_ui_log_callback(wine_ui_log_callback_t cb);
 uint64_t madeira_get_present_count(void);
 // Explicit profiling markers: no changes to input or guest execution.
 void madeira_perf_mark_phase(unsigned phase);
+// ml1174: GPU busy time for the performance overlay (winemetal_unix.c). While
+// enabled, each committed command buffer adds its GPU time (union) on completion.
+void madeira_gpu_meter_enable(int on);
+double madeira_gpu_meter_busy_seconds(void);
+uint64_t madeira_gpu_meter_cmdbufs(void);
 // ml1098: ask the D3D12 runtime to capture the next N frames (winemetal_unix.c)
 void madeira_capture_request(int frames);
 // ml1133: ECO switch (ntdll unix sync.c). 1 = every guest thread drops to a
@@ -51,6 +58,9 @@ void madeira_set_display_max_fps(int panel_hz, int intent_hz);
 // 1 when DXMT's own madeira_set_display_max_fps (and with it the 30 FPS cap,
 // vsync mode 3) is linked; valid after the first madeira_set_display_max_fps call.
 int madeira_dxmt_has_display_pacing(void);
+// 1 when DXMT has the 40 FPS cap (vsync mode 4). Defined by DXMT; IOSDisplayShim.m
+// carries a weak fallback that returns 0, so the app links against a DXMT without it.
+int madeira_dxmt_has_40_cap(void);
 
 /* ml526: startup phase timeline (Winios.m) */
 void winios_phase(const char *name);

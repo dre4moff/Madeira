@@ -1,4 +1,4 @@
-# Complete fork changes — Madeira 0.1.3 / r31
+# Complete fork changes — Madeira 0.1.3 / r32
 
 This unofficial fork is based on Will Faust's official `v0.1.3`
 (`4e9d45a74294cd820120791c4b3f2b79adf4fc70`). Original copyright and licenses
@@ -6,6 +6,21 @@ are retained. Fork changes were prepared with AI assistance and are offered
 for inspection, not as an upstream endorsement or a guaranteed FPS increase.
 The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
+
+## r32 — Every original upstream update, with fork features preserved
+
+- Merge all 207 missing original commits through `48f9764`, including the
+  original Wine/FEX/DXMT/Dock pins. Keep all 14 original fork commits in history.
+- Include Wine Mono and the original patch, save backups/shortcuts, library
+  groups, offline Steam, original launch keys, spatial MetalFX, frame generation,
+  NVIDIA reporting, AVX, HID output, 40 FPS and the full D3D12/runtime changes.
+- Preserve fork controls and fixes; combine NVIDIA/spatial settings with the
+  opt-in DLSS profile, and selected Steam launch keys with bounded arguments.
+- Rebuild current native/PE components, retain the complete 32-bit farm and
+  rebuild changed Wine/XInput and graphics frontends for both architectures.
+- Optimized Release build 17, 116 passing host suites and complete final-resource
+  verification. Physical-device acceptance and the existing stutter issue remain
+  separate. See [r32 evidence](R32_UPSTREAM_SYNC.md).
 
 ## r31 — Explicit shader cache purge and movement-stutter evidence
 

@@ -2794,6 +2794,15 @@ int wine_server_receive_fd( obj_handle_t *handle )
         server_protocol_perror("recvmsg");
     }
     /* the server closed the connection; time to die... */
+#ifdef WINE_IOS
+    /* iOS-Madeira ml1183: a killed thread whose fd socket died between get_handle_fd's
+     * reply and this read is inside server_get_unix_fd's fd_cache_mutex section: exiting
+     * here leaves that mutex, shared by every process of the task, locked (the hang
+     * ios_defer_section_abort fixes for the request pipes). Fail the read instead; the
+     * caller maps -1 to an error and the thread exits when it leaves the section.
+     * Outside a section (process init): unchanged. */
+    if (ios_defer_section_abort()) return -1;
+#endif
     abort_thread(0);
 }
 
@@ -3614,6 +3623,10 @@ void process_exit_wrapper( int status )
             extern void ios_fd_cache_release( void *peb );
             ios_fd_cache_release( dead_peb );
         }
+        {   /* ml1205: its ml938 sub-floor windows go with it */
+            extern void ios_subfloor_release_owner( void *owner );
+            ios_subfloor_release_owner( dead_peb );
+        }
         /* Task #25: release this pseudo-process's JIT pool allocations
          * (module copies, trampolines, FEX CodeBuffers). Children only —
          * the session (else-branch) lives as long as the app. Reuse is
@@ -3756,6 +3769,381 @@ static void ios_create_drive_symlinks(void)
     }
     closedir( dir );
     wine_log_write( "[drives] published %d/%d DOS drive(s) in \\DosDevices rev=ml587", created, seen );
+}
+
+#include "hw_registry_ios.h"
+
+/* CNTFRQ_EL0, the counter FEX scales the guest's TSC from. */
+static uint64_t ios_hw_cntfrq(void)
+{
+    uint64_t freq = 0;
+#ifdef __aarch64__
+    __asm__ volatile( "mrs %0, CNTFRQ_EL0" : "=r" (freq) );
+#endif
+    return freq;
+}
+
+/* hw-registry-test:begin (tests/host/check-hw-registry.py compiles from here to the end mark) */
+#define IOS_HW_RSMB 0x52534d42   /* 'RSMB', the SMBIOS firmware table provider */
+
+/* One registry key, created level by level below `base` (an existing key),
+ * every new level volatile. NtCreateKey makes ONE key: since Wine 11 keys are
+ * named objects and a path whose parent is missing fails with
+ * STATUS_OBJECT_NAME_NOT_FOUND (server/registry.c key_lookup_name), as on
+ * Windows; only kernelbase's RegCreateKeyEx walks the path itself. */
+static HANDLE ios_hw_key( const char *base, const char *subpath )
+{
+    WCHAR nameW[256];
+    UNICODE_STRING name;
+    OBJECT_ATTRIBUTES attr;
+    HANDLE key, parent;
+    const char *p = subpath, *end;
+    size_t len = strlen( base );
+
+    if (len >= ARRAY_SIZE(nameW)) return 0;
+    ascii_to_unicode( nameW, base, len + 1 );
+    init_unicode_string( &name, nameW );
+    InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, 0, NULL );
+    if (NtOpenKey( &parent, KEY_ALL_ACCESS, &attr )) return 0;
+    while (*p)
+    {
+        if (!(end = strchr( p, '\\' ))) end = p + strlen( p );
+        len = end - p;
+        if (!len || len >= ARRAY_SIZE(nameW))
+        {
+            NtClose( parent );
+            return 0;
+        }
+        ascii_to_unicode( nameW, p, len );
+        nameW[len] = 0;
+        init_unicode_string( &name, nameW );
+        InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, parent, NULL );
+        if (NtCreateKey( &key, KEY_ALL_ACCESS, &attr, 0, NULL, REG_OPTION_VOLATILE, NULL )) key = 0;
+        NtClose( parent );
+        if (!key) return 0;
+        parent = key;
+        p = *end ? end + 1 : end;
+    }
+    return parent;
+}
+
+/* The SMBIOS table exactly as GetSystemFirmwareTable('RSMB') hands it to the
+ * guest (WMI's Win32_BIOS / Win32_BaseBoard read the same bytes); NULL when
+ * ntdll has none. */
+static unsigned char *ios_hw_smbios( ULONG *len )
+{
+    const ULONG head = offsetof( SYSTEM_FIRMWARE_TABLE_INFORMATION, TableBuffer );
+    SYSTEM_FIRMWARE_TABLE_INFORMATION *sfti;
+    ULONG size = head, needed = 0;
+    unsigned char *table = NULL;
+    NTSTATUS status;
+    int tries;
+
+    *len = 0;
+    for (tries = 0; tries < 2; tries++)
+    {
+        if (!(sfti = calloc( 1, size ))) return NULL;
+        sfti->ProviderSignature = IOS_HW_RSMB;
+        sfti->Action = SystemFirmwareTable_Get;
+        sfti->TableID = 0;
+        status = NtQuerySystemInformation( SystemFirmwareTableInformation, sfti, size, &needed );
+        if (status == STATUS_BUFFER_TOO_SMALL && needed > size)
+        {
+            free( sfti );
+            size = needed;
+            continue;
+        }
+        if (!status && sfti->TableBufferLength && sfti->TableBufferLength <= size - head &&
+            (table = malloc( sfti->TableBufferLength )))
+        {
+            memcpy( table, sfti->TableBuffer, sfti->TableBufferLength );
+            *len = sfti->TableBufferLength;
+        }
+        free( sfti );
+        break;
+    }
+    return table;
+}
+
+/* wineboot's fallback when the TSC rate is unknown: the processor's MaxMhz. */
+static DWORD ios_hw_power_mhz(void)
+{
+    ULONG count = peb->NumberOfProcessors ? peb->NumberOfProcessors : 1;
+    PROCESSOR_POWER_INFORMATION *info;
+    DWORD mhz = 0;
+
+    if ((info = calloc( count, sizeof(*info) )))
+    {
+        if (!NtPowerInformation( ProcessorInformation, NULL, 0, info, count * sizeof(*info) ))
+            mhz = info[0].MaxMhz;
+        free( info );
+    }
+    return mhz;
+}
+
+static void ios_hw_sz( HANDLE key, const char *name, const char *value )
+{
+    WCHAR nameW[64], data[HWREG_STR];
+    UNICODE_STRING str;
+    size_t n = strnlen( value, HWREG_STR - 1 );
+
+    ascii_to_unicode( nameW, name, strlen( name ) + 1 );
+    ascii_to_unicode( data, value, n );
+    data[n] = 0;
+    init_unicode_string( &str, nameW );
+    NtSetValueKey( key, &str, 0, REG_SZ, data, (n + 1) * sizeof(WCHAR) );
+}
+
+static void ios_hw_dword( HANDLE key, const char *name, DWORD value )
+{
+    WCHAR nameW[64];
+    UNICODE_STRING str;
+
+    ascii_to_unicode( nameW, name, strlen( name ) + 1 );
+    init_unicode_string( &str, nameW );
+    NtSetValueKey( key, &str, 0, REG_DWORD, &value, sizeof(value) );
+}
+
+/***********************************************************************
+ *           ios_hw_registry_publish
+ *
+ * wineboot's create_hardware_registry_keys for this port. Desktop Wine runs
+ * wineboot at every boot and it writes the volatile
+ * HKLM\HARDWARE\DESCRIPTION\System tree: Identifier and SystemBiosDate, BIOS
+ * (from the SMBIOS table), CentralProcessor\N and FloatingPointProcessor\N for
+ * every processor. wineboot never runs here, so none of it existed: GTA V
+ * Enhanced's hardware-info thread failed to open CentralProcessor\0 and BIOS,
+ * and WMI's Win32_Processor had no Caption. Written once per session, by the
+ * first process, after init_cpu_info (the processor count) and before the
+ * first process builds its environment. The processor values describe what
+ * the x86-64 guest sees from FEX's CPUID (hw_registry_ios.h), the count is
+ * GetSystemInfo's. Children of the session read the same registry.
+ */
+void ios_hw_registry_publish(void)
+{
+    static const char machine[] = "\\Registry\\Machine";
+    static const char sysdesc[] = "HARDWARE\\DESCRIPTION\\System";
+    struct hwreg_cpu cpu;
+    struct hwreg_bios bios;
+    unsigned int i, count, cpus = 0, fpus = 0;
+    unsigned char *smbios;
+    ULONG smbios_len = 0;
+    char path[96];
+    HANDLE key;
+
+    /* 0 writes no HARDWARE\DESCRIPTION keys (wineboot's volatile hardware tree,
+     * which no session had before). */
+    if (!hwreg_enabled( getenv( "MADEIRA_HW_REGISTRY" ) ))
+    {
+        wine_log_write( "[hw-registry] MADEIRA_HW_REGISTRY=0, no HARDWARE\\DESCRIPTION keys written" );
+        return;
+    }
+
+    count = hwreg_cpu_count( peb->NumberOfProcessors );
+    hwreg_fex_cpu( &cpu, ios_hw_cntfrq() );
+    if (!cpu.mhz) cpu.mhz = ios_hw_power_mhz();
+    smbios = ios_hw_smbios( &smbios_len );
+    hwreg_bios_values( &bios, smbios, smbios_len, PACKAGE_VERSION );
+    free( smbios );
+
+    if (!(key = ios_hw_key( machine, sysdesc )))
+    {
+        wine_log_write( "[hw-registry] could not create HKLM\\%s, nothing written", sysdesc );
+        return;
+    }
+    ios_hw_sz( key, "Identifier", "AT compatible" );
+    ios_hw_sz( key, "SystemBiosDate", "01/01/70" );
+    NtClose( key );
+
+    snprintf( path, sizeof(path), "%s\\BIOS", sysdesc );
+    if ((key = ios_hw_key( machine, path )))
+    {
+        ios_hw_sz( key, "BaseBoardManufacturer", bios.board_vendor );
+        ios_hw_sz( key, "BaseBoardProduct", bios.board_product );
+        ios_hw_sz( key, "BaseBoardVersion", bios.board_version );
+        ios_hw_sz( key, "BIOSVendor", bios.bios_vendor );
+        ios_hw_sz( key, "BIOSVersion", bios.bios_version );
+        ios_hw_sz( key, "BIOSReleaseDate", bios.bios_date );
+        ios_hw_dword( key, "BiosMajorRelease", bios.bios_major );
+        ios_hw_dword( key, "BiosMinorRelease", bios.bios_minor );
+        ios_hw_dword( key, "ECFirmwareMajorVersion", bios.ec_major );
+        ios_hw_dword( key, "ECFirmwareMinorVersion", bios.ec_minor );
+        ios_hw_sz( key, "SystemManufacturer", bios.sys_vendor );
+        ios_hw_sz( key, "SystemProductName", bios.sys_product );
+        ios_hw_sz( key, "SystemVersion", bios.sys_version );
+        ios_hw_sz( key, "SystemSKU", bios.sys_sku );
+        ios_hw_sz( key, "SystemFamily", bios.sys_family );
+        NtClose( key );
+    }
+
+    for (i = 0; i < count; i++)
+    {
+        snprintf( path, sizeof(path), "%s\\CentralProcessor\\%u", sysdesc, i );
+        if ((key = ios_hw_key( machine, path )))
+        {
+            ios_hw_dword( key, "FeatureSet", cpu.feature_set );
+            ios_hw_sz( key, "Identifier", cpu.identifier );
+            ios_hw_sz( key, "VendorIdentifier", cpu.vendor );
+            ios_hw_sz( key, "ProcessorNameString", cpu.brand );
+            ios_hw_dword( key, "~MHz", cpu.mhz );
+            NtClose( key );
+            cpus++;
+        }
+        snprintf( path, sizeof(path), "%s\\FloatingPointProcessor\\%u", sysdesc, i );
+        if ((key = ios_hw_key( machine, path )))
+        {
+            ios_hw_sz( key, "Identifier", cpu.identifier );
+            NtClose( key );
+            fpus++;
+        }
+    }
+
+    wine_log_write( "[hw-registry] HKLM\\%s (volatile): %u/%u CentralProcessor + %u FloatingPointProcessor "
+                    "\"%s\" %s \"%s\" ~MHz %u FeatureSet 0x%08x; BIOS \"%s\" \"%s\" (%s, %u Wine default(s))",
+                    sysdesc, cpus, count, fpus, cpu.identifier, cpu.vendor, cpu.brand, (unsigned int)cpu.mhz,
+                    (unsigned int)cpu.feature_set, bios.sys_vendor, bios.sys_product,
+                    smbios_len ? "SMBIOS" : "no SMBIOS table", bios.defaults );
+}
+/* hw-registry-test:end */
+
+#include "../hidpad/hidpad_ids.h"
+
+/* ml2105: the HID pad's registry keys are made level by level, every new level
+ * volatile, by the same helper as the hardware description keys above. */
+#define ios_hidpad_key ios_hw_key
+
+static void ios_hidpad_value( HANDLE key, const char *value, ULONG type, const char *const *strings,
+                              unsigned int count, DWORD number )
+{
+    WCHAR nameW[32], data[512];
+    UNICODE_STRING name;
+    ULONG size = 0;
+    unsigned int i;
+
+    ascii_to_unicode( nameW, value, strlen( value ) + 1 );
+    init_unicode_string( &name, nameW );
+    if (type == REG_DWORD)
+    {
+        NtSetValueKey( key, &name, 0, type, &number, sizeof(number) );
+        return;
+    }
+    for (i = 0; i < count; i++)
+    {
+        size_t len = strlen( strings[i] ) + 1;
+        if (size + len + 1 > ARRAY_SIZE(data)) break;
+        ascii_to_unicode( data + size, strings[i], len );
+        size += len;
+    }
+    if (type == REG_MULTI_SZ) data[size++] = 0;
+    NtSetValueKey( key, &name, 0, type, data, size * sizeof(WCHAR) );
+}
+
+/* ml2105: the identity whose \??\HID#... link the wineserver created
+ * (hidpad_ios.c), or NULL; `link` gets its interface name. The registry must
+ * name exactly the device that exists: the wineserver reads MADEIRA_HIDPAD
+ * when it starts, but madeira.cfg's env.NAME lines are exported later, just
+ * before this process, and could name another identity. */
+static const struct hidpad_identity *ios_hidpad_live_identity( char *link, unsigned int size )
+{
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(hidpad_identities); i++)
+    {
+        WCHAR pathW[256];
+        char path[256];
+        UNICODE_STRING name;
+        OBJECT_ATTRIBUTES attr;
+        HANDLE handle;
+
+        hidpad_interface_link( &hidpad_identities[i], link, size );
+        snprintf( path, sizeof(path), "\\??\\%s", link );
+        ascii_to_unicode( pathW, path, strlen( path ) + 1 );
+        init_unicode_string( &name, pathW );
+        InitializeObjectAttributes( &attr, &name, OBJ_CASE_INSENSITIVE, 0, NULL );
+        if (!NtOpenSymbolicLinkObject( &handle, SYMBOLIC_LINK_QUERY, &attr ))
+        {
+            NtClose( handle );
+            return &hidpad_identities[i];
+        }
+    }
+    return NULL;
+}
+
+/***********************************************************************
+ *           ios_hidpad_publish
+ *
+ * ml2102: the registry half of the opt-in HID controller (MADEIRA_HIDPAD,
+ * build/hidpad/hidpad_ids.h). setupapi lists GUID_DEVINTERFACE_HID from
+ * DeviceClasses\{4d1e55b2-...}: an interface key with DeviceInstance, its "#"
+ * subkey with SymbolicLink and Control\Linked = 1 (what DIGCF_PRESENT checks,
+ * setupapi devinst.c is_linked), and the Enum key that DeviceInstance names,
+ * whose ClassGUID setupapi needs before it lists the device at all. hidclass
+ * and setupapi write the same keys for a real device on desktop Wine (the
+ * prefix template still holds Wine's virtual HID mouse and keyboard in this
+ * shape, minus the volatile Control\Linked); win32u's raw input list reads
+ * them too. The \??\HID#... link they point at is the wineserver's
+ * (hidpad_ios.c). First process only, like the drive links above, so it is in
+ * place before any game enumerates. In XInput mode the app unsets
+ * MADEIRA_HIDPAD (GamepadInput.beginPadSession) and this does nothing.
+ */
+static void ios_hidpad_publish(void)
+{
+    static const char enumkey[] = "\\Registry\\Machine\\System\\CurrentControlSet\\Enum";
+    static const char classes[] = "\\Registry\\Machine\\System\\CurrentControlSet\\Control\\DeviceClasses";
+    const struct hidpad_identity *id;
+    char link[200], path[400], instance[128], symlink[210];
+    const char *class_name = "HIDClass", *class_guid = HIDPAD_HIDCLASS_GUID;
+    const char *desc = "HID-compliant game controller";
+    unsigned int written = 0;
+    HANDLE key;
+
+    if (!getenv( "MADEIRA_HIDPAD" )) return;
+    if (!(id = ios_hidpad_live_identity( link, sizeof(link) )))
+    {
+        wine_log_write( "[hid-pad] ml2105 MADEIRA_HIDPAD=%s but the wineserver made no pad; "
+                        "nothing registered rev=ml2105", getenv( "MADEIRA_HIDPAD" ) );
+        return;
+    }
+    snprintf( instance, sizeof(instance), "%s\\%s", id->device_id, id->instance );
+    snprintf( symlink, sizeof(symlink), "\\\\?\\%s", link );
+
+    if ((key = ios_hidpad_key( enumkey, instance )))
+    {
+        ios_hidpad_value( key, "ClassGUID", REG_SZ, &class_guid, 1, 0 );
+        ios_hidpad_value( key, "Class", REG_SZ, &class_name, 1, 0 );
+        ios_hidpad_value( key, "DeviceDesc", REG_SZ, &desc, 1, 0 );
+        ios_hidpad_value( key, "Mfg", REG_SZ, &id->manufacturer, 1, 0 );
+        ios_hidpad_value( key, "HardwareID", REG_MULTI_SZ, id->hardware_ids, ARRAY_SIZE(id->hardware_ids), 0 );
+        ios_hidpad_value( key, "ContainerID", REG_SZ, &id->container_id, 1, 0 );
+        ios_hidpad_value( key, "ConfigFlags", REG_DWORD, NULL, 0, 0 );
+        NtClose( key );
+        written++;
+    }
+    snprintf( path, sizeof(path), "%s\\##?#%s", HIDPAD_HID_INTERFACE_GUID, link );
+    if ((key = ios_hidpad_key( classes, path )))
+    {
+        const char *value = instance;
+        ios_hidpad_value( key, "DeviceInstance", REG_SZ, &value, 1, 0 );
+        NtClose( key );
+        written++;
+    }
+    snprintf( path, sizeof(path), "%s\\##?#%s\\#", HIDPAD_HID_INTERFACE_GUID, link );
+    if ((key = ios_hidpad_key( classes, path )))
+    {
+        const char *value = symlink;
+        ios_hidpad_value( key, "SymbolicLink", REG_SZ, &value, 1, 0 );
+        NtClose( key );
+        written++;
+    }
+    snprintf( path, sizeof(path), "%s\\##?#%s\\#\\Control", HIDPAD_HID_INTERFACE_GUID, link );
+    if ((key = ios_hidpad_key( classes, path )))
+    {
+        ios_hidpad_value( key, "Linked", REG_DWORD, NULL, 0, 1 );
+        NtClose( key );
+        written++;
+    }
+    wine_log_write( "[hid-pad] ml2102 %s %04X:%04X registered (%u/4 keys) as %s rev=ml2105",
+                    id->env, id->vid, id->pid, written, symlink );
 }
 #endif
 
@@ -3933,6 +4321,8 @@ size_t server_init_process(void)
     /* First process only (children use server_init_process_child), so the DOS
      * drive objects are published exactly once, before the shell enumerates. */
     ios_create_drive_symlinks();
+    /* ml2102: the opt-in HID controller's registry entries; nothing in XInput mode. */
+    ios_hidpad_publish();
 #endif
 
     for (i = 0; i < supported_machines_count; i++)
@@ -4400,7 +4790,12 @@ void server_init_process_done(void)
          * exe's entry — main_image_info is restored to the session's exe
          * right after child startup-info init (see wine_ios_child_main). */
         extern const SECTION_IMAGE_INFORMATION *ios_cur_image_info(void);
-        signal_start_thread( ios_cur_image_info()->TransferAddress, peb, suspend, NtCurrentTeb() );
+        extern void *ios_subfloor_low_entry( void *entry, ULONG image_charact );
+        extern void ios_child_boot_unlock( void );
+        ios_child_boot_unlock();   /* ml1213: the child's unix boot is done */
+        signal_start_thread( ios_subfloor_low_entry( ios_cur_image_info()->TransferAddress,
+                                                     ios_cur_image_info()->ImageCharacteristics ),
+                             peb, suspend, NtCurrentTeb() );
     }
 }
 

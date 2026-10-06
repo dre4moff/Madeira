@@ -50,7 +50,7 @@ compile_one() {
 # Useful for a targeted fix without rebuilding network/crypto modules.
 if [ "${MADEIRA_ONLY:-}" = "signal_arm64" ] || [ "${MADEIRA_ONLY:-}" = "audio_null_ios" ] || [ "${MADEIRA_ONLY:-}" = "virtual" ] || [ "${MADEIRA_ONLY:-}" = "process" ]; then
     test -f "$APP_LIB" && test -f "$WINE_BUILD/include/config.h"
-    if [ "$MADEIRA_ONLY" = "audio_null_ios" ]; then
+    if [ "${MADEIRA_ONLY:-}" = "audio_null_ios" ]; then
         compile_one "$BUILD_DIR/audio_null_ios.c" "audio_null_ios"
     elif [ "$MADEIRA_ONLY" = "virtual" ]; then
         compile_one "$BUILD_DIR/virtual_ios.c" "virtual"
@@ -208,7 +208,7 @@ for src in $WINE_SRC/dlls/ntdll/unix/*.c; do
             compile_one "$BUILD_DIR/virtual_ios.c" "virtual"
             ;;
         signal_arm64)
-            if [ "$MADEIRA_ONLY" = "audio_null_ios" ]; then
+            if [ "${MADEIRA_ONLY:-}" = "audio_null_ios" ]; then
         compile_one "$BUILD_DIR/audio_null_ios.c" "audio_null_ios"
     else
         compile_one "$BUILD_DIR/signal_arm64_ios.c" "signal_arm64"
@@ -230,6 +230,7 @@ if [ -n "$FAILED_FILES" ]; then
 fi
 
 echo ""
+[ "$FAILED" -eq 0 ] || exit 1
 echo "=== Building libntdll_unix.a ==="
 ar rcs "$OBJ_DIR/libntdll_unix.a" \
     "$OBJ_DIR/audio_null_ios.o" "$OBJ_DIR/madsync.o" "$OBJ_DIR/nsi_unixlib_ios.o" \

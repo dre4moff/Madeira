@@ -6,6 +6,8 @@
 #include <string.h>
 
 static char *madeira_dlss_baseline, *madeira_dlss_applied;
+static char *madeira_dlss_nvext_baseline;
+static int madeira_dlss_nvext_applied;
 static inline void madeira_restore_dlss_overrides(void) {
     const char *current = getenv("WINEDLLOVERRIDES");
     if (madeira_dlss_applied && current && !strcmp(current, madeira_dlss_applied)) {
@@ -14,6 +16,13 @@ static inline void madeira_restore_dlss_overrides(void) {
     }
     free(madeira_dlss_baseline); free(madeira_dlss_applied);
     madeira_dlss_baseline = madeira_dlss_applied = NULL;
+    if (madeira_dlss_nvext_applied) {
+        if (madeira_dlss_nvext_baseline) setenv("DXMT_ENABLE_NVEXT", madeira_dlss_nvext_baseline, 1);
+        else unsetenv("DXMT_ENABLE_NVEXT");
+    }
+    free(madeira_dlss_nvext_baseline);
+    madeira_dlss_nvext_baseline = NULL;
+    madeira_dlss_nvext_applied = 0;
 }
 
 static inline void madeira_apply_dlss_profile(int enabled) {
@@ -34,11 +43,15 @@ static inline void madeira_apply_dlss_profile(int enabled) {
             }
         }
     }
-    setenv("DXMT_ENABLE_NVEXT", on ? "1" : "0", 1);
-    // DLSS already reconstructs the game's final output: never also scale Present.
-    setenv("DXMT_METALFX_SPATIAL_SWAPCHAIN", "0", 1);
-    unsetenv("DXMT_METALFX_SPATIAL_FACTOR");
-    unsetenv("DXMT_METALFX_OUTPUT_WIDTH"); unsetenv("DXMT_METALFX_OUTPUT_HEIGHT");
+    if (on) {
+        const char *nvext = getenv("DXMT_ENABLE_NVEXT");
+        madeira_dlss_nvext_baseline = nvext ? strdup(nvext) : NULL;
+        madeira_dlss_nvext_applied = (!nvext || madeira_dlss_nvext_baseline) && !setenv("DXMT_ENABLE_NVEXT", "1", 1);
+        // DLSS already reconstructs the game's final output: never also scale Present.
+        setenv("DXMT_METALFX_SPATIAL_SWAPCHAIN", "0", 1);
+        unsetenv("DXMT_METALFX_SPATIAL_FACTOR");
+        unsetenv("DXMT_METALFX_OUTPUT_WIDTH"); unsetenv("DXMT_METALFX_OUTPUT_HEIGHT");
+    }
     fprintf(stderr, "[dlss-metalfx] enabled=%d temporal=1 display-resolution-preserved=1 (D3D11 + Madeira D3D12; enable DLSS in-game)\n", on);
 }
 static inline void madeira_apply_metalfx_profile(double factor) {

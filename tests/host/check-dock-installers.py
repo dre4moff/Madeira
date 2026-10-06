@@ -75,10 +75,10 @@ require('Copyright 2026 125hz' in installers.split('\n', 3)[1], 'new file carrie
 game_src = dock[dock.index('/// A game Steam\'s client has installed'):dock.index('/// Madeira Dock: a small headless host')]
 stubs = r'''
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#else
+#if canImport(Glibc)
 import Glibc
+#else
+import Darwin
 #endif
 enum SteamSignIn {
     static func flag(_ name: String, default fallback: Bool) -> Bool { getenv(name).map { String(cString: $0) != "0" } ?? fallback }
@@ -98,10 +98,10 @@ enum MadeiraDock { static let executable = "C:\\windows\\system32\\dockhost.exe"
 
 checks = r'''
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#else
+#if canImport(Glibc)
 import Glibc
+#else
+import Darwin
 #endif
 var failures = 0
 func require(_ condition: @autoclosure () -> Bool, _ label: String) {

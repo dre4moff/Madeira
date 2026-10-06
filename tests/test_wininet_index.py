@@ -94,7 +94,7 @@ static DWORD cache_container_open_index(cache_container *c,DWORD blocks) {
 static void *test_malloc(size_t n){if(fail(8))return NULL;return malloc(n);}
 '''
 code+=function('cache_container_close_index')+'\n'+function('cache_container_lock_index')+'\n'+function('cache_container_unlock_index')+'\n'
-baseline=subprocess.check_output(['git','-C',str(root/'wine'),'show','HEAD:dlls/wininet/urlcache.c'],text=True)
+baseline=subprocess.check_output(['git','-C',str(root/'wine'),'show','4f5b19718f4de88ecc5cb0dc08b119497a67ba8f:dlls/wininet/urlcache.c'],text=True)
 for name in ['cache_container_lock_index','cache_container_unlock_index']:
  code+=function(name,baseline).replace(name,'baseline_'+name)+'\n'
 code+='#define malloc test_malloc\n'+function('cache_index_write')+'\n'+function('cache_container_clean_index')+'\n#undef malloc\n'

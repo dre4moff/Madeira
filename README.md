@@ -4,14 +4,18 @@ Unofficial fork based on [Will Faust's Madeira 0.1.3](https://github.com/willfau
 The original app and engines are credited below. This fork adds per-game VC++
 runtime and DX11 controls, controller integration fixes, experimental DLSS-to-
 MetalFX bridges for DX11/DX12, cache maintenance, real microphone capture, worker context and fullscreen fixes,
-and texture streaming overhead reductions. The current release is **0.1.3 Fork r31**;
-all official 0.1.3 features are integrated, including built-in StikJIT, Steam
-Cloud saves and physical controllers as keyboard/mouse.
+and texture streaming overhead reductions. The current release is **0.1.3 Fork r32**;
+all changes from upstream `main` through `48f9764` are integrated, including
+Wine Mono, save backups and Home Screen shortcuts, grouped libraries, offline
+Steam, original launch-entry keys, spatial MetalFX, frame generation, NVIDIA
+reporting, AVX options, HID controller output and the latest D3D12/runtime work.
+The existing fork controls, microphone, DLSS bridges and cache fixes remain.
 
 **Start here:** [complete fork changes and evidence](docs/FORK_CHANGELOG.md),
 [unsigned release and personal VC runtime setup](docs/FORK_RELEASE.md),
 [PS-less D3D12 mesh pipeline correction](docs/R21_MESH_DEPTH.md),
 [D3D12 startup corrections](docs/R20_D3D12_STARTUP.md),
+[full upstream sync and release checks](docs/R32_UPSTREAM_SYNC.md),
 [manual cache cleanup and remaining movement stutters](docs/R31_PERFORMANCE_REPORT.md).
 The latest patch is compiled and synthetically tested; higher on-device FPS and
 universal DLSS compatibility are not established. Microsoft runtime DLLs are
@@ -179,6 +183,10 @@ proposing anything to it.
 - **Jfishin** ([@Jfishin](https://github.com/Jfishin)): the original native Steam sign-in, library and downloads
 - **Jesse** ([@JesseLovelace](https://github.com/JesseLovelace)): Steam Cloud saves, faster game launches, and fixes that let more games run
 - **Dan Perks** ([@danperks](https://github.com/danperks)): in-app JIT without StikDebug, and pairing without a computer
+- **bahacan16** ([@bahacan16](https://github.com/bahacan16)): Direct3D 12 and DXMT fixes, game launcher windows, per-game settings, PlayStation controllers, and save backups
+- **spitefulowl** ([@spitefulowl](https://github.com/spitefulowl)): Wine and FEX runtime fixes, DXMT texture and memory fixes, audio, the swap tier, and library launch options
+- **meshoklv** ([@meshoklv](https://github.com/meshoklv)): controller fixes for games that ship their own XInput or need focus, touch taps that stay off the mouse, and a crash-guard fix
+- **TheHadesc** ([@TheHadesc](https://github.com/TheHadesc)): Madeira Dock starts for games whose Steam launch entries do not start at zero, and a touch gamepad that survives the in-game keyboard
 
 Madeira is built on [Wine](https://www.winehq.org/), [FEX-Emu](https://github.com/FEX-Emu/FEX),
 [DXMT](https://github.com/3Shain/DXMT) by Feifan He (3Shain) with the Direct3D 9

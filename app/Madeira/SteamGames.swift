@@ -217,6 +217,7 @@ enum SteamDirectStart {
         var program: String
         var arguments: String
         var folder: String?
+        var launchIndex: UInt32? = nil
     }
 
     /// Launch types Steam gives entries that are not the game itself.
@@ -270,6 +271,7 @@ enum SteamDirectStart {
         func rank(_ option: SteamLaunchOption) -> Int? {
             let type = option.type.lowercased()
             guard option.betaKey.isEmpty, !otherKinds.contains(type),
+                  option.requiredDLC == nil || option.requiredDLC == "" || option.requiredDLC == "0",
                   option.oslist.isEmpty || option.oslist.lowercased().contains("windows") else { return nil }
             let kind: Int
             if type == "default" { kind = 0 } else if type.isEmpty || type == "none" { kind = 1 } else { kind = 2 }
@@ -298,7 +300,8 @@ enum SteamDirectStart {
                     folder = found
                 }
             }
-            return Choice(program: program, arguments: option.arguments.trimmingCharacters(in: spaces), folder: folder)
+            return Choice(program: program, arguments: option.arguments.trimmingCharacters(in: spaces), folder: folder,
+                          launchIndex: option.index)
         }
         return nil
     }
@@ -689,7 +692,7 @@ private extension SteamOwnedLibrary.Download {
 
 /// A game's card, or its row in the library's list layouts (as the fork's
 /// library rows: artwork, name, state and playtime, or the download's progress).
-private struct SteamGameCell: View {
+struct SteamGameCell: View {
     let item: SteamGamesRules.Item
     var list = false
     var dense = false

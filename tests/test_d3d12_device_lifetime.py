@@ -37,7 +37,7 @@ struct mad_device {
  LONG refs,device_lost,fence_quit;LONG64 gpu_serial_failed;
  const char *name;
  void *fence_thread,*fence_wake;
- obj_handle_t gpu_event,dsso,mtl_queue,mtl_device;
+ obj_handle_t gpu_event,dsso,mtl_queue,mtl_device,ds_scratch;
  unsigned ntheaps,nfillpat,nring_pool,nring_retired,nmhret;
  struct theap *theaps;struct pattern *fillpat;
  struct ring *ring_pool,*ring_retired;

@@ -295,6 +295,7 @@ final class SteamOwnedLibrary: ObservableObject {
 
     private func clearCaches() {
         cachedAccount = nil
+        DockOffline.clear()   // the offline notes belonged to that account
         try? FileManager.default.removeItem(at: Self.cacheURL)
         try? FileManager.default.removeItem(at: Self.playtimeURL)
     }
@@ -335,7 +336,7 @@ final class SteamOwnedLibrary: ObservableObject {
     /// app's own connection (signed in, no session running) and kept in the cache.
     /// nil when it cannot be had; the Program picker then decides.
     func launchOptions(appID: Int) async -> [SteamLaunchOption]? {
-        if let cached = game(appID)?.launches { return cached }
+        if let cached = game(appID)?.launches, cached.allSatisfy({ $0.index != nil }) { return cached }
         guard Self.enabled, signedIn, !inSession, appID > 0, appID <= Int(UInt32.max) else { return nil }
         do {
             guard let info = try await fetcher.fetchAppInfo(appID: UInt32(appID)) else { return nil }

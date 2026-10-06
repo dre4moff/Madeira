@@ -6,7 +6,7 @@ import os, re, subprocess, tempfile
 root=Path(__file__).resolve().parents[1]
 src=(root/'dxmt/src/d3d11/d3d11_context_impl.cpp').read_text()
 start=src.index('      if (direct_uploads && cpu_address) {')
-branch=src[start:src.index('      SwitchToBlitEncoder(',start)]
+branch=src[start:src.index('      /* ml1252:',start)]
 unix=(root/'dxmt/src/winemetal/unix/winemetal_unix.c').read_text()
 start=unix.index('static NTSTATUS\n_MTLBuffer_updateTextureContents(')
 handler=unix[start:unix.index('static NTSTATUS\n_WMTGetOSVersion(',start)]

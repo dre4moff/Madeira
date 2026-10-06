@@ -5,12 +5,12 @@
 [submodule "wine"]
 	path = wine
 	url = https://github.com/dre4moff/wine.git
-	branch = codex/audio-com-r22
+	branch = codex/upstream-sync-r32
 [submodule "dxmt"]
 	path = dxmt
 	url = https://github.com/dre4moff/dxmt.git
-	branch = codex/cache-cleanup-performance-r31
+	branch = codex/upstream-sync-r32
 [submodule "madeira-dock"]
 	path = madeira-dock
 	url = https://github.com/dre4moff/madeira-dock.git
-	branch = codex/launch-clock-r23
+	branch = codex/upstream-sync-r32

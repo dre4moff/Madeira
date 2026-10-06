@@ -1,3 +1,4 @@
+from library_host_fixture import resolution_choices
 """Actual Steam desktop sizing and output cap; host-only synthetic profiles."""
 from pathlib import Path
 import subprocess,tempfile
@@ -68,6 +69,8 @@ int main() {
  puts("PASS: output bound validates, applies after config and clears between profiles");
 }
 '''
+swift = resolution_choices() + swift
+
 with tempfile.TemporaryDirectory(prefix='madeira-metalfx-launch-') as tmp:
  p=Path(tmp);(p/'main.swift').write_text(swift);(p/'test.cpp').write_text(c);(p/'profile.c').write_text(profile)
  subprocess.run(['swift',str(p/'main.swift')],check=True)

@@ -37,6 +37,9 @@
 #include "d3dkmdt.h"
 #include "wine/wingdi16.h"
 #include "wine/server.h"
+#ifdef WINE_IOS
+#include "madeira_kmt.h"   /* iOS-Madeira: opt-in D3DKMT adapter (d3dkmt_ios.c) */
+#endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(system);
 
@@ -1168,7 +1171,9 @@ static const char* driver_vendor_to_version( UINT16 vendor )
     {
     case 0x8086: /* Intel */    return "35.0.101.6314";
     case 0x1002: /* AMD */      return "35.0.21025.1024";
-    case 0x10de: /* Nvidia */   return "35.0.15.6094";
+    /* iOS-Madeira: 581.57, the driver DXMT's NVAPI reports; 35.0.15.6094 reads
+     * as 560.94, older than what current titles require (GTA V Enhanced: 572.60). */
+    case 0x10de: /* Nvidia */   return "32.0.15.8157";
     default:                    return "35.0.10.1000";
     }
 }
@@ -2476,6 +2481,12 @@ static void monitor_get_info( struct monitor *monitor, MONITORINFO *info, UINT d
     {
         char buffer[CCHDEVICENAME];
         if (monitor->source) snprintf( buffer, sizeof(buffer), "\\\\.\\DISPLAY%d", monitor->source->id + 1 );
+#ifdef WINE_IOS
+        /* iOS-Madeira: the virtual monitor is the one EnumDisplayDevices and
+         * DXGI call "\\.\DISPLAY1"; "WinDisc" is Windows' name for a
+         * disconnected display, so a program matching the two found none. */
+        else if (monitor == &virtual_monitor) strcpy( buffer, "\\\\.\\DISPLAY1" );
+#endif
         else strcpy( buffer, "WinDisc" );
         asciiz_to_unicode( ((MONITORINFOEXW *)info)->szDevice, buffer );
     }
@@ -2895,6 +2906,146 @@ void reset_monitor_update_serial(void)
     pthread_mutex_unlock( &display_lock );
 }
 
+#ifdef WINE_IOS
+/* iOS-Madeira: the display adapter of the virtual-monitor regime. Its identity
+ * follows DXGI's: Apple 106B:0001, or NVIDIA when DXMT reports NVIDIA
+ * (DXMT_ENABLE_NVEXT=1; the app then also sets dxgi.customDeviceId=2544, a
+ * GeForce RTX 3060, so DXGI, EnumDisplayDevices, SetupAPI and NVAPI name the
+ * same GPU). */
+static const char ios_video_guidA[] = "{8C0C2A5B-0E7E-4B0E-9E3F-1D0A6B5C4D21}";
+
+static void ios_virtual_gpu_ids( UINT16 *vendor, UINT16 *device )
+{
+    const char *nv = getenv( "DXMT_ENABLE_NVEXT" );
+    if (nv && nv[0] == '1') { *vendor = 0x10de; *device = 0x2544; }
+    else { *vendor = 0x106b; *device = 0x0001; }
+}
+
+/* Every game shares one prefix and the registry is saved, so a launch with the
+ * other identity left its adapter behind: two display devices under Enum\PCI,
+ * both pointing at Class\{display}\0000, and the stale one may sort first.
+ * Remove the identity this launch does not report. */
+static void ios_forget_virtual_gpu( UINT16 vendor, UINT16 device )
+{
+    static const char *classes[] = { guid_devinterface_display_adapterA, guid_display_device_arrivalA };
+    char dev[64], buffer[MAX_PATH];
+    WCHAR nameW[MAX_PATH];
+    unsigned int i;
+    HKEY hkey;
+
+    snprintf( dev, sizeof(dev), "VEN_%04X&DEV_%04X&SUBSYS_00000000&REV_00", vendor, device );
+    if ((hkey = reg_open_ascii_key( enum_key, "PCI" )))
+    {
+        reg_delete_tree( hkey, nameW, asciiz_to_unicode( nameW, dev ) - sizeof(WCHAR) );
+        NtClose( hkey );
+    }
+    for (i = 0; i < ARRAY_SIZE(classes); i++)
+    {
+        snprintf( buffer, sizeof(buffer), "DeviceClasses\\%s", classes[i] );
+        if (!(hkey = reg_open_ascii_key( control_key, buffer ))) continue;
+        snprintf( buffer, sizeof(buffer), "##?#PCI#%s#%08X#%s", dev, 0, classes[i] );
+        reg_delete_tree( hkey, nameW, asciiz_to_unicode( nameW, buffer ) - sizeof(WCHAR) );
+        NtClose( hkey );
+    }
+}
+
+/* This port never enumerates display devices (the service-process branch of
+ * lock_display_devices), so the registry held no display adapter: no Enum\PCI
+ * entry for SetupAPI, no Class\{display}\0000 with a DriverVersion, no
+ * DirectX\{guid} key, and the DeviceKey EnumDisplayDevices hands out named a
+ * key that did not exist. Engines that read the driver version from there
+ * (Ghost of Tsushima: "Failed to get GPU Driver Info", then "No installed
+ * graphics card") found nothing. Write one adapter with write_gpu_to_registry,
+ * once per process, without adding it to `gpus`: the display topology stays
+ * the virtual monitor's. */
+static void ios_register_virtual_gpu(void)
+{
+    static int done;
+    struct pci_id pci = {0};
+    struct gpu gpu = {0};
+    const char *name;
+    char buffer[MAX_PATH];
+    WCHAR bufferW[128];
+    DWORD len;
+    HKEY hkey;
+    int kmt;
+
+    if (done) return;
+    done = 1;
+    if (!enum_key) enum_key = reg_create_ascii_key( NULL, enum_keyA, 0, NULL );
+    if (!control_key) control_key = reg_create_ascii_key( NULL, control_keyA, 0, NULL );
+    if (!enum_key || !control_key) return;
+
+    ios_virtual_gpu_ids( &pci.vendor, &pci.device );
+    if (pci.vendor == 0x10de) ios_forget_virtual_gpu( 0x106b, 0x0001 );
+    else ios_forget_virtual_gpu( 0x10de, 0x2544 );
+    name = gpu_device_name( pci.vendor, pci.device, "Madeira Display" );
+    RtlUTF8ToUnicodeN( gpu.name, sizeof(gpu.name) - sizeof(WCHAR), &len, name, strlen( name ) );
+    gpu.refcount = 1;
+    gpu.index = 0;
+    memcpy( gpu.guid, ios_video_guidA, sizeof(gpu.guid) );
+    /* MADEIRA_KMT_ADAPTER=1: the registry GPU carries the LUID DXGI /
+     * madeira_d3d12 / NVAPI report and EnumAdapters2 lists, and the dedicated
+     * size of the D3DKMT adapter; off: a fresh LUID and 4096 MB. */
+    kmt = madeira_kmt_adapter_enabled() && madeira_kmt_adapter_luid( &gpu.luid );
+    if (!kmt) NtAllocateLocallyUniqueId( &gpu.luid );
+    snprintf( gpu.path, sizeof(gpu.path), "PCI\\VEN_%04X&DEV_%04X&SUBSYS_00000000&REV_00\\%08X",
+              pci.vendor, pci.device, gpu.index );
+    if (!write_gpu_to_registry( &gpu, &pci, kmt ? madeira_kmt_dedicated_bytes() : (ULONGLONG)4096 * 1024 * 1024 ))
+    {
+        dprintf( 2, "[vgpu] could not write the virtual GPU to the registry\n" );
+        return;
+    }
+    if (kmt)
+    {
+        /* write_gpu_to_registry's DirectX\{guid} DriverVersion is "some
+         * version in the future"; make it the QWORD of the DriverVersion
+         * string, which is also the D3DKMT UMD version. */
+        UINT64 ver = madeira_kmt_driver_version_qword( driver_vendor_to_version( pci.vendor ) );
+        snprintf( buffer, sizeof(buffer), "%s\\%s", directx_keyA, gpu.guid );
+        if ((hkey = reg_create_ascii_key( NULL, buffer, REG_OPTION_VOLATILE, NULL )))
+        {
+            asciiz_to_unicode( bufferW, "DriverVersion" );
+            set_reg_value( hkey, bufferW, REG_QWORD, &ver, sizeof(ver) );
+            NtClose( hkey );
+        }
+    }
+
+    /* The DeviceKey EnumDisplayDevices returns for the adapter. On Windows it
+     * carries the driver's identity too; give it the same values. */
+    snprintf( buffer, sizeof(buffer), "Video\\%s\\0000", ios_video_guidA );
+    if ((hkey = reg_create_ascii_key( control_key, buffer, 0, NULL )))
+    {
+        set_reg_ascii_value( hkey, "DriverVersion", driver_vendor_to_version( pci.vendor ) );
+        set_reg_ascii_value( hkey, "ProviderName", driver_vendor_to_name( pci.vendor ) );
+        asciiz_to_unicode( bufferW, "DriverDesc" );
+        set_reg_value( hkey, bufferW, REG_SZ, gpu.name, (wcslen( gpu.name ) + 1) * sizeof(WCHAR) );
+        asciiz_to_unicode( bufferW, "HardwareInformation.AdapterString" );
+        set_reg_value( hkey, bufferW, REG_SZ, gpu.name, (wcslen( gpu.name ) + 1) * sizeof(WCHAR) );
+        NtClose( hkey );
+    }
+    dprintf( 2, "[vgpu] registered %s (%04x:%04x) driver %s%s\n", gpu.path, pci.vendor, pci.device,
+             driver_vendor_to_version( pci.vendor ), kmt ? " (MADEIRA_KMT_ADAPTER: the D3DKMT adapter's LUID)" : "" );
+}
+
+/* What the D3DKMT adapter (d3dkmt_ios.c, MADEIRA_KMT_ADAPTER=1) reports: the
+ * registry GPU ios_register_virtual_gpu writes. */
+void madeira_kmt_identity( struct madeira_kmt_identity *id )
+{
+    struct pci_id pci = {0};
+
+    memset( id, 0, sizeof(*id) );
+    ios_virtual_gpu_ids( &pci.vendor, &pci.device );
+    id->vendor = pci.vendor;
+    id->device = pci.device;
+    snprintf( id->name, sizeof(id->name), "%s", gpu_device_name( pci.vendor, pci.device, "Madeira Display" ) );
+    snprintf( id->driver_version, sizeof(id->driver_version), "%s", driver_vendor_to_version( pci.vendor ) );
+    snprintf( id->path, sizeof(id->path), "PCI\\VEN_%04X&DEV_%04X&SUBSYS_00000000&REV_00\\%08X",
+              pci.vendor, pci.device, 0 );
+    id->dedicated = madeira_kmt_dedicated_bytes();
+}
+#endif
+
 static BOOL lock_display_devices( BOOL force )
 {
     static const WCHAR wine_service_station_name[] =
@@ -2935,6 +3086,9 @@ static BOOL lock_display_devices( BOOL force )
         clear_display_devices();
         list_add_tail( &monitors, &virtual_monitor.entry );
         set_winstation_monitors( TRUE );
+#ifdef WINE_IOS
+        ios_register_virtual_gpu();
+#endif
         return TRUE;
     }
 
@@ -4270,7 +4424,11 @@ static NTSTATUS d3dkmt_open_adapter_from_gdi_display_name( D3DKMT_OPENADAPTERFRO
         if (!virtual_luid_ready)
         {
             struct gpu *first = LIST_ENTRY( list_head( &gpus ), struct gpu, entry );
-            if (!list_empty( &gpus ) && first)
+            if (madeira_kmt_adapter_enabled() && madeira_kmt_adapter_luid( &virtual_luid ))
+                dprintf( 2, "[vmode] ml1006 virtual adapter uses the MADEIRA_KMT_ADAPTER luid %08x%08x "
+                         "(the DXGI / D3D12 adapter)\n", (unsigned)virtual_luid.HighPart,
+                         (unsigned)virtual_luid.LowPart );
+            else if (!list_empty( &gpus ) && first)
             {
                 virtual_luid = first->luid;
                 dprintf( 2, "[vmode] ml1006 virtual adapter adopts the registered GPU luid "
@@ -4371,10 +4529,41 @@ NTSTATUS WINAPI NtUserEnumDisplayDevices( UNICODE_STRING *device, DWORD index,
             else
                 info->StateFlags = DISPLAY_DEVICE_ATTACHED | DISPLAY_DEVICE_ACTIVE;
         }
-        if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceID) + sizeof(info->DeviceID))
-            *info->DeviceID = 0;
-        if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceKey) + sizeof(info->DeviceKey))
-            *info->DeviceKey = 0;
+        {
+            /* The adapter is the GPU ios_register_virtual_gpu writes to the
+             * registry, with its PCI id and driver key; the monitor has its
+             * device instance id, or its device interface path with
+             * EDD_GET_DEVICE_INTERFACE_NAME (an adapter has none, on Windows
+             * either). Programs walk adapter -> monitor -> interface to find the
+             * GPU that drives their monitor (Ghost of Tsushima asks
+             * EnumDisplayDevices(L"\\.\DISPLAY1", 0, EDD_GET_DEVICE_INTERFACE_NAME)). */
+            char id[MAX_PATH] = "", key[MAX_PATH] = "";
+
+            if (is_adapter)
+            {
+                UINT16 vendor, device_id;
+
+                pthread_mutex_lock( &display_lock );
+                ios_register_virtual_gpu();
+                pthread_mutex_unlock( &display_lock );
+                ios_virtual_gpu_ids( &vendor, &device_id );
+                if (!(flags & EDD_GET_DEVICE_INTERFACE_NAME))
+                    snprintf( id, sizeof(id), "PCI\\VEN_%04X&DEV_%04X&SUBSYS_00000000&REV_00", vendor, device_id );
+                snprintf( key, sizeof(key), "%s\\Video\\%s\\0000", control_keyA, ios_video_guidA );
+            }
+            else
+            {
+                if (flags & EDD_GET_DEVICE_INTERFACE_NAME)
+                    snprintf( id, sizeof(id), "\\\\?\\DISPLAY#Default_Monitor#4&madeira&0&UID0#%s", guid_devinterface_monitorA );
+                else
+                    snprintf( id, sizeof(id), "MONITOR\\Default_Monitor\\%s\\0000", guid_devclass_monitorA );
+                snprintf( key, sizeof(key), "%s\\Class\\%s\\0000", control_keyA, guid_devclass_monitorA );
+            }
+            if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceID) + sizeof(info->DeviceID))
+                asciiz_to_unicode( info->DeviceID, id );
+            if (info->cb >= offsetof(DISPLAY_DEVICEW, DeviceKey) + sizeof(info->DeviceKey))
+                asciiz_to_unicode( info->DeviceKey, key );
+        }
         {
             static int logged;
             if (logged++ < 4)
@@ -7565,8 +7754,18 @@ int get_system_metrics( int index )
     case SM_CYMIN:        return 38;
     case SM_CXMINTRACK:   return 132;
     case SM_CYMINTRACK:   return 38;
-    case SM_CXMAXTRACK:   return 1920;
-    case SM_CYMAXTRACK:   return 1080;
+    /* ml1157: CreateWindowEx clamps an overlapped window to the max track
+     * size. A virtual screen taller than 1080 (the Resolution list's ~1080p
+     * and native sizes on an iPad, 1728x1200 and 2360x1640 on an 11-inch one)
+     * would clip a windowed game there, so follow the screen plus a frame's
+     * worth, as Windows does, never below the old values. */
+    case SM_CXMAXTRACK:
+    case SM_CYMAXTRACK:
+    {
+        int sw, sh;
+        ios_screen_size( &sw, &sh );
+        return index == SM_CXMAXTRACK ? max( 1920, sw + 16 ) : max( 1080, sh + 16 );
+    }
     /* screen-size metrics follow MADEIRA_SCREEN_W/H (defaults keep the
      * legacy 1024x768 for the games path where the env is unset).
      * Explorer's taskbar positions itself from SM_C{X,Y}SCREEN — the
@@ -8601,6 +8800,25 @@ NTSTATUS WINAPI NtGdiDdDDIEnumAdapters2( D3DKMT_ENUMADAPTERS2 *desc )
     }
     unlock_display_devices();
 
+#ifdef WINE_IOS
+    /* iOS-Madeira, MADEIRA_KMT_ADAPTER=1: the virtual-monitor regime has no GPU
+     * in `gpus`; list the one DXGI / madeira_d3d12 / NVAPI report, by their
+     * LUID, driving the virtual monitor's one source. */
+    if (!count && madeira_kmt_adapter_enabled() && madeira_kmt_adapter_luid( &open_adapter_from_luid.AdapterLuid ))
+    {
+        if (!desc->NumAdapters) return STATUS_BUFFER_TOO_SMALL;
+        if (!(status = NtGdiDdDDIOpenAdapterFromLuid( &open_adapter_from_luid )))
+        {
+            desc->pAdapters[0].hAdapter = open_adapter_from_luid.hAdapter;
+            desc->pAdapters[0].AdapterLuid = open_adapter_from_luid.AdapterLuid;
+            desc->pAdapters[0].NumOfSources = 1;
+            desc->pAdapters[0].bPrecisePresentRegionsPreferred = FALSE;
+            desc->NumAdapters = 1;
+        }
+        return status;
+    }
+#endif
+
     if (count > desc->NumAdapters)
     {
         status = STATUS_BUFFER_TOO_SMALL;
@@ -8719,6 +8937,16 @@ NTSTATUS WINAPI NtGdiDdDDIOpenAdapterFromDeviceName( D3DKMT_OPENADAPTERFROMDEVIC
         break;
     }
     unlock_display_devices();
+#ifdef WINE_IOS
+    /* iOS-Madeira, MADEIRA_KMT_ADAPTER=1: the registry GPU's display-device
+     * interface (SetupAPI lists it) opens the DXGI / D3D12 adapter. */
+    if (!found && madeira_kmt_adapter_enabled())
+    {
+        struct madeira_kmt_identity kmt_id;
+        madeira_kmt_identity( &kmt_id );
+        if (!strcmp( name + 4, kmt_id.path ) && madeira_kmt_adapter_luid( &desc_luid.AdapterLuid )) found = TRUE;
+    }
+#endif
 
     if (found && !(status = NtGdiDdDDIOpenAdapterFromLuid( &desc_luid )))
     {

@@ -22,9 +22,13 @@ stub = r'''
 #define WINIOS_PX_TO_PT_Y (g_px_to_pt_y>0?g_px_to_pt_y:g_px_to_pt)
 static NSMutableDictionary<NSNumber *,CALayer *> *g_layers;
 static NSMutableDictionary<NSNumber *,NSValue *> *g_px_rects,*g_client_rects;
+static NSMutableDictionary<NSNumber *,NSValue *> *g_surf_sizes;
 static NSMutableDictionary<NSNumber *,CAMetalLayer *> *g_metal_layers;
 static NSNumber *g_fit_key,*g_game_key;
 static CALayer *g_game_backdrop;
+static CALayer *g_desk_bg;
+static BOOL g_comp_game;
+static void winios_forget_cursor_layer(void) {}
 static NSView *g_compositor_view;
 static CGRect g_fit_client_px,g_fit_view_pt,g_desk_rect;
 static BOOL g_desk_rect_set;

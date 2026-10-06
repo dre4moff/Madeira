@@ -1,3 +1,4 @@
+from library_host_fixture import resolution_choices
 """Host-only DirectX 11 tests. No client DLL, game or Wine process is executed."""
 from pathlib import Path
 import re
@@ -11,8 +12,9 @@ control_action = content_actions[content_actions.index('enum ControlAction:'):co
 library = (root / "app/Madeira/Library.swift").read_text()
 helper = library[library.index("enum LibraryLaunchArguments {"):library.index("struct LibraryEntry:")]
 fields = library[library.index("struct LibraryEntry: Codable, Identifiable {"):library.index("    var displayMode:")]
-computed = library[library.index("    var launchArguments: String {"):library.index('    /// What a launch starts')]
-swift = "import Foundation\nstruct TouchControl: Codable {}\n" + control_action + helper + fields + computed + r'''
+computed = library[library.index("    var launchArguments: String {"):library.index('    /// Runs on the launch worker')]
+computed = re.sub(r"    var effectiveFPSMode: Int32 .*\n", "", computed)
+swift = "import Foundation\nstruct TouchControl: Codable {}\nenum LibraryError: Error {case message(String)}\n" + control_action + helper + fields + computed + r'''
 }
 let original = "-windowed  -dx12 -path \"Maps -dx12\""
 assert(LibraryLaunchArguments.directX11(original, enabled: false) == original)
@@ -44,7 +46,7 @@ print("PASS: per-game DX11 arguments, saved profiles, direct/Steam direct starts
 
 dock = (root / "madeira-dock/src/launch.c").read_text()
 wide_flag = dock[dock.index("static bool wide_flag("):dock.index("/* Returns 0 once")]
-choice = "    char user_args[4096]; assert(read_user_args(user_args, sizeof(user_args)));"
+choice = "    unsigned launch_option=7; char user_args[4096]; assert(read_user_args(user_args, sizeof(user_args)));"
 calls = re.findall(r"^\s*(?:uint64_t )?call = (\(\(launch_fn\).+);", dock, re.M)
 assert len(calls) == 2, "Initial launch and retry must both forward the selected arguments"
 bridge = (root / "app/Madeira/WineProcessBridge.m").read_text()
@@ -92,7 +94,7 @@ typedef uint64_t (*launch_fn)(void *, const uint64_t *, uint32_t, int32_t, const
 static const char *expected;
 static unsigned submitted;
 static uint64_t fake_launch(void *manager, const uint64_t *gameid, uint32_t source, int32_t option, const char *args) {
-    assert(manager && *gameid == 3949040 && source == 0 && option == 0);
+    assert(manager && *gameid == 3949040 && source == 7 && option == 0);
     assert(!strcmp(args, expected));
     submitted++;
     return 42;
@@ -132,6 +134,8 @@ int main(void) {
     puts("PASS: actual Dock initial launch/retry arguments and per-session config precedence/reset");
 }
 '''
+swift = resolution_choices() + swift
+
 with tempfile.TemporaryDirectory(prefix="madeira-dx11-test-") as tmp:
     tmp = Path(tmp)
     (tmp / "main.swift").write_text(swift)

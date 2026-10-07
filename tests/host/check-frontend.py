@@ -152,6 +152,20 @@ expect((try? game.validate()) != nil, "a screen-shape resolution validates")
 game.resolution = "1280x720"; game.configureLaunch()
 
 // A Steam game: Madeira Dock sets what starts, so its profile leaves MADEIRA_EXE alone...
+var localGame = game
+expect(!localGame.startsLocalGameWithDock, "older external profiles keep their direct launch")
+localGame.localDock = true
+expect(localGame.startsLocalGameWithDock && !localGame.usesLaunchOptions, "external Dock profile delegates launching to the host")
+let localBack = try! JSONDecoder().decode(LibraryEntry.self, from: JSONEncoder().encode(localGame))
+expect(localBack.startsLocalGameWithDock && localBack.relativePath == localGame.relativePath && localBack.arguments == localGame.arguments, "local Dock choice round trips without changing the executable or arguments")
+setenv("MADEIRA_EXE", "explorer.exe", 1); setenv("MADEIRA_ARGS", "host", 1)
+localBack.configureLaunch()
+expect(env("MADEIRA_EXE") == "explorer.exe" && env("MADEIRA_ARGS") == "host", "local profile preserves the already prepared Dock command")
+localGame.steamAppID = 42
+expect(!localGame.startsLocalGameWithDock, "external choice never changes the installed Steam launch path")
+localGame.steamAppID = nil; localGame.desktop = true
+expect(!localGame.startsLocalGameWithDock, "Desktop never takes the external Dock path")
+
 var steamGame = LibraryEntry(title: "Steam game", relativePath: "Program Files (x86)/Steam/steamapps/common/Some Game", bits: 0)
 steamGame.steamAppID = 4242
 setenv("MADEIRA_EXE", "set-by-dock", 1); setenv("MADEIRA_STEAM_APPID", "1", 1)

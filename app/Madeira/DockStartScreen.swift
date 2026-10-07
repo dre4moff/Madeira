@@ -218,6 +218,8 @@ enum DockStartStatus {
             return "Steam is still loading this game's configuration. Waiting for it…"
         }
         if fields["launch-client-error"] == "0" { return "The game is starting. Waiting for its window…" }
+        if fields["launch-local-started"] == "1" { return "The game is starting. Waiting for its window…" }
+        if fields["session-local-client-ready"] == "1" { return "Signed in. Starting the local game…" }
         if ["ceg-scm", "ceg-request-busy", "ceg-request"].contains(where: { fields[$0] != nil }) && fields["ceg-result"] == nil {
             return "Steam is preparing this game's executable…"
         }
@@ -230,6 +232,7 @@ enum DockStartStatus {
             return "No connection. Asking Steam to sign in offline…"
         }
         if fields["session-requested-app-listed"] == "1" { return "License confirmed. Steam is starting the game…" }
+        if fields["session-local-mode"] == "1" && fields["session-authenticated-online"] == "1" { return "Signed in. Starting the local game…" }
         if fields["session-authenticated-online"] == "1" { return "Signed in. Waiting for Steam to confirm this game's license…" }
         if fields["session-native-token-submitted"] != nil || fields["session-logon-start-result"] != nil {
             return "Signing in to Steam…"
@@ -300,7 +303,7 @@ final class DockStartScreen: ObservableObject {
         endHold(reason: nil)
         winios_set_game_window(0)
         winios_window_census_enable(0)
-        active = game != nil; appID = game?.id; failure = nil
+        active = game != nil; appID = game?.local == true ? nil : game?.id; failure = nil
         exitObserved = false; hostStarted = false; early = []; started = start
         authSubmittedAt = nil; authStallReported = false
         guard let game else { return }

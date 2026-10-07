@@ -212,6 +212,17 @@ func jwt(_ claims: String) -> String {
         require((try? MadeiraDock.subject(jwt(#"{"sub":"76561197960265729"}"#))) == steamID, "JWT subject selects the account")
         require((try? MadeiraDock.subject("opaque")) == nil && (try? MadeiraDock.subject(jwt(#"{"sub":"x"}"#))) == nil, "no usable subject: refused")
 
+        let client = try MadeiraDock.envelope(account: "fixture", token: "a.b-c_d", steamID: steamID, appID: 0, clientOnly: true)
+        require(String(decoding: client.prefix(8), as: UTF8.self) == "MDOCK002", "client-only handoff has its own protocol")
+        require(client[16..<20].allSatisfy { $0 == 0 }, "client-only handoff supplies no game identity")
+        require((try? MadeiraDock.envelope(account: "fixture", token: "a.b-c_d", steamID: steamID, appID: 10, clientOnly: true)) == nil, "client-only handoff cannot claim an app")
+        var local = alpha; local.local = true
+        MadeiraDock.configure(local, localProgram: "C:\\Games\\Fixture.exe", localDirectory: "C:\\Games")
+        require(env("MADEIRA_DOCK_LOCAL") == "1" && env("MADEIRA_DOCK_LOCAL_PROGRAM") == "C:\\Games\\Fixture.exe", "local program is passed to the authenticated host")
+        require(env("MADEIRA_STEAM_HOST_CEG") == nil && env("MADEIRA_STEAM_HOST_EXPECTED_INSTALL") == nil && env("MADEIRA_DOCK_OFFLINE") == nil, "local session has no Steam install, CEG or offline launch")
+        MadeiraDock.configure(alpha)
+        require(env("MADEIRA_DOCK_LOCAL") == nil && env("MADEIRA_DOCK_LOCAL_PROGRAM") == nil && env("MADEIRA_DOCK_LOCAL_DIRECTORY") == nil, "normal Steam launch clears the local mode")
+
         // Host environment and launch.
         MadeiraDock.configure(alpha, launchOption: 7)
         require(env("MADEIRA_STEAM_HOST_LAUNCH_OPTION") == "7", "the original launch entry key reaches the host")

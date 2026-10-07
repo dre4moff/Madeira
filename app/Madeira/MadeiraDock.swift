@@ -34,6 +34,7 @@ struct DockGame: Identifiable, Equatable, Sendable {
     let library: String         // drive-relative steamapps folder
     let installed: Bool         // StateFlags has "fully installed"
     let customExecutables: Bool // the install record lists per-user executables (CheckGuid)
+    var local = false
 
     /// Windows path of the game's folder, which Dock requires Valve's client to resolve to.
     var windowsInstallPath: String {
@@ -151,16 +152,16 @@ enum MadeiraDock {
 
     /// Tokens stay in Keychain except for this bounded one-use transfer. The
     /// payload is not an ownership claim: Valve authenticates it in the guest.
-    static func envelope(account: String, token: String, steamID: UInt64, appID: Int) throws -> Data {
+    static func envelope(account: String, token: String, steamID: UInt64, appID: Int, clientOnly: Bool = false) throws -> Data {
         let name = Array(account.utf8), secret = Array(token.utf8)
         guard (1...64).contains(name.count), (1...8192).contains(secret.count),
               name.allSatisfy({ (33...126).contains($0) }),
               secret.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || [45, 46, 95].contains($0) }),
               steamID >> 56 == 1, (steamID >> 52) & 15 == 1, (steamID >> 32) & 0xfffff == 1,
-              steamID & 0xffffffff != 0, validAppID(appID) else {
+              steamID & 0xffffffff != 0, (clientOnly ? appID == 0 : validAppID(appID)) else {
             throw DockError.message("Your Steam sign-in cannot be handed to Dock. Sign in to Steam again in Madeira.")
         }
-        var data = Data("MDOCK001".utf8)
+        var data = Data((clientOnly ? "MDOCK002" : "MDOCK001").utf8)
         func append(_ value: UInt64, bytes: Int) {
             for i in 0..<bytes { data.append(UInt8(truncatingIfNeeded: value >> (i * 8))) }
         }
@@ -215,6 +216,8 @@ enum MadeiraDock {
                     : "Steam did not finish signing in. Check the connection and try again."
             }
             if result == 35 { return "Steam did not confirm a license for this game on the signed-in account." }
+            if result == 53 { return "Madeira Dock could not start this local executable. Check its program, working folder and online Steam sign-in." }
+            if result == 54 { return "Madeira Dock could not load this local executable. Export the log before trying again." }
             // Offline start (madeira-dock docs/OFFLINE.md): Valve's client decides.
             if result == 50 {
                 return fields["session-offline-abi"] == "0"
@@ -291,7 +294,7 @@ enum MadeiraDock {
         "session-account-input-invalid", "session-app-input-invalid",
         "session-native-token-submitted", "session-logon-start-result", "session-connection-result",
         "session-auth-wait-ms", "session-auth-step", "session-auth-state",
-        "session-authenticated-online", "session-requested-app-entitled", "session-subscription-count",
+        "session-authenticated-online", "session-local-client-ready", "session-local-mode", "launch-local-started", "launch-local-error", "launch-local-exit", "session-requested-app-entitled", "session-subscription-count",
         "session-requested-app-listed", "session-auth-test-result",
         "session-online-subscription-count", "session-online-app-zero-query", "session-online-callback-id",
         "session-timeout-subscription-count", "session-timeout-app-listed", "session-timeout-still-online",
@@ -375,19 +378,20 @@ enum MadeiraDock {
         if let url = transferURL { try? FileManager.default.removeItem(at: url) }
         unsetenv("MADEIRA_DOCK_AUTH_FILE")
         unsetenv("MADEIRA_DOCK_OFFLINE")
+        for key in ["MADEIRA_DOCK_LOCAL", "MADEIRA_DOCK_LOCAL_PROGRAM", "MADEIRA_DOCK_LOCAL_DIRECTORY"] { unsetenv(key) }
     }
 
     /// Writes the one-use transfer to protected Application Support storage
     /// (complete file protection, mode 0600, excluded from backups, created
     /// exclusively) and puts only its guest path in the environment. No
     /// token, account name or path is logged.
-    @MainActor static func writeHandoff(account: String, token: String, appID: Int) throws {
+    @MainActor static func writeHandoff(account: String, token: String, appID: Int, clientOnly: Bool = false) throws {
         cleanup()
         lastReport = Report()
         let report = drive.appendingPathComponent("madeira-dock.txt")
         if FileManager.default.fileExists(atPath: report.path) { try FileManager.default.removeItem(at: report) }
         guard let url = transferURL else { throw DockError.message("Dock's private transfer folder is unavailable.") }
-        var data = try envelope(account: account, token: token, steamID: subject(token), appID: appID)
+        var data = try envelope(account: account, token: token, steamID: subject(token), appID: appID, clientOnly: clientOnly)
         defer { data.resetBytes(in: data.startIndex..<data.endIndex) }
         let fm = FileManager.default
         var folder = url.deletingLastPathComponent()
@@ -410,7 +414,7 @@ enum MadeiraDock {
     }
 
     /// The host's environment for one launch.
-    static func configure(_ game: DockGame, launchOption: UInt32 = 0) {
+    static func configure(_ game: DockGame, launchOption: UInt32 = 0, localProgram: String? = nil, localDirectory: String? = nil) {
         for key in ["MADEIRA_STEAM_HOST_PROBE", "MADEIRA_STEAM_HOST_SESSION", "MADEIRA_STEAM_HOST_LOGIN", "MADEIRA_STEAM_HOST_LAUNCH"] {
             setenv(key, "1", 1)
         }
@@ -447,7 +451,17 @@ enum MadeiraDock {
         let guardMap = SteamSignIn.flag("MADEIRA_DOCK_IMAGE_MAP_GUARD", default: true)
         if guardMap { setenv("MADEIRA_IMAGE_MAP_GUARD", "1", 1) }
         SteamLog.event("[dock-launch] image-map-guard=\(guardMap ? 1 : 0)")
-        DockOffline.configure(appID: game.id)
+        if game.local, let localProgram, let localDirectory {
+            setenv("MADEIRA_DOCK_LOCAL", "1", 1)
+            setenv("MADEIRA_DOCK_LOCAL_PROGRAM", localProgram, 1)
+            setenv("MADEIRA_DOCK_LOCAL_DIRECTORY", localDirectory, 1)
+            unsetenv("MADEIRA_DOCK_OFFLINE")
+            unsetenv("MADEIRA_STEAM_HOST_CEG")
+            unsetenv("MADEIRA_STEAM_HOST_EXPECTED_INSTALL")
+        } else {
+            for key in ["MADEIRA_DOCK_LOCAL", "MADEIRA_DOCK_LOCAL_PROGRAM", "MADEIRA_DOCK_LOCAL_DIRECTORY"] { unsetenv(key) }
+            DockOffline.configure(appID: game.id)
+        }
     }
 
     /// Wine's explorer opens a virtual desktop and starts the host in it. With

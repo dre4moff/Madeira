@@ -43,7 +43,7 @@ trap 'rm -rf "$TMP"' EXIT
 section() { printf '\n\n==== %s ====\n\n' "$1"; }
 {
     cat "$SRC/LICENSE"
-    printf '\nCorresponding source: https://github.com/125hz/madeira-dock (commit %s)\n' \
+    printf '\nCorresponding source: https://github.com/dre4moff/madeira-dock (commit %s)\n' \
         "$(git -C "$SRC" rev-parse HEAD 2>/dev/null || echo unknown)"
     section 'LICENSE-EXCEPTION.md (Madeira Converter Exception)'
     cat "$SRC/LICENSE-EXCEPTION.md"

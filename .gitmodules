@@ -13,4 +13,4 @@
 [submodule "madeira-dock"]
 	path = madeira-dock
 	url = https://github.com/dre4moff/madeira-dock.git
-	branch = codex/upstream-sync-r32
+	branch = codex/local-dock-r35

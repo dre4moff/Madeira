@@ -593,6 +593,10 @@ enum DockInstallers {
 
     /// Called right before a Dock start, while no session runs (the registry is on disk).
     /// Records the previous batch's results, plans the game's programs and writes the batch.
+    static func prepareLocal() {
+        script = nil; serverSync = false; note = nil; finishedAt = nil; logged = []
+    }
+
     static func prepare(_ game: DockGame, drive: URL, prefix: URL,
                         has32Bit: Bool = DockInstallers.bundleHas32Bit, hasMsiexec: Bool = DockInstallers.bundleHasMsiexec,
                         fusionSource: URL? = Bundle.main.resourceURL?.appendingPathComponent("i386-windows/fusion.dll")) {

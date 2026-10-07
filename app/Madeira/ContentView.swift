@@ -2505,6 +2505,18 @@ struct ContentView: View {
     /// applies the entry's launch profile and runs the same full sequence as the
     /// developer interface's buttons.
     private func launchLibraryEntry(_ entry: LibraryEntry) {
+        if entry.startsLocalGameWithDock {
+            do {
+                _ = try LibraryModel.executable(entry.launchRelativePath)
+                guard entry.launchRelativePath.lowercased().hasSuffix(".exe"),
+                      LibraryEntry.hostURL(ofWindowsPath: entry.launchDirectory) != nil else {
+                    throw DockError.message("Choose a Windows .exe and a working folder on drive C: for Madeira Dock.")
+                }
+                let game = DockGame(id: 0, name: entry.title, installDir: "", library: "", installed: true, customExecutables: false, local: true)
+                startDock(game, compactPool: MadeiraDockModel.shared.compactPool, profile: entry)
+            } catch { library.error = error.localizedDescription }
+            return
+        }
         // A Steam game starts through Madeira Dock with its own launch profile (SteamGames.swift),
         // unless its Game details page chose "The game": then its own program starts below, like
         // any library game (SteamDirectStart).
@@ -3297,7 +3309,9 @@ struct ContentView: View {
         let inLibrary = library.enabled
         guard jitReadyForLaunch(inLibrary: inLibrary, entry: profile?.id,
                                 then: { startDock(game, compactPool: compactPool, profile: profile) }) else { return }
-        guard cloudClear(game.id, name: game.name, retry: { startDock(game, compactPool: compactPool, profile: profile) }) else { return }
+        if !game.local {
+            guard cloudClear(game.id, name: game.name, retry: { startDock(game, compactPool: compactPool, profile: profile) }) else { return }
+        }
         guard wine_process_is_running() == 0, wineserver_is_running() == 0, !inLibrary || library.current == nil else {
             logStore.log("[madeira-dock] a session already ran in this app run; restart Madeira first", level: .error)
             if inLibrary { library.error = "A session is already running." }
@@ -3316,7 +3330,17 @@ struct ContentView: View {
             if inLibrary { library.error = error.localizedDescription }
         }
         do {
-            try MadeiraDock.validate(game, drive: MadeiraDock.drive)
+            if game.local {
+                guard MadeiraDock.enabled, MadeiraDock.clientInstalled, let profile, profile.startsLocalGameWithDock else {
+                    throw DockError.message("Download Steam's client components in Settings before starting Madeira Dock.")
+                }
+                _ = try LibraryModel.executable(profile.launchRelativePath)
+                var isFolder: ObjCBool = false
+                guard let directory = LibraryEntry.hostURL(ofWindowsPath: profile.launchDirectory),
+                      FileManager.default.fileExists(atPath: directory.path, isDirectory: &isFolder), isFolder.boolValue else {
+                    throw DockError.message("The game's working folder is missing.")
+                }
+            } else { try MadeiraDock.validate(game, drive: MadeiraDock.drive) }
             try profile?.validate()
             guard SteamSignIn.isSignedIn else { throw DockError.message("Sign in to Steam in Madeira before starting Dock.") }
         } catch { fail(error); return }
@@ -3330,7 +3354,7 @@ struct ContentView: View {
             // Without a choice (no configuration to be had, or no entry whose .exe is on disk:
             // a launcher started through a .bat, say) it is key 0, which every Dock start
             // used before; Dock stops at once if Steam names that entry missing.
-            let options = await SteamOwnedLibrary.shared.launchOptions(appID: game.id)
+            let options = game.local ? nil : await SteamOwnedLibrary.shared.launchOptions(appID: game.id)
             let installFolder = MadeiraDock.drive.appendingPathComponent(game.library + "/common/" + game.installDir)
             let chosen = options.flatMap { SteamDirectStart.choose($0, installFolder: installFolder)?.launchIndex }
             let launchOption = chosen ?? 0
@@ -3345,12 +3369,15 @@ struct ContentView: View {
                 guard let signIn = SteamSignIn.credentialsForDock() else {
                     throw DockError.message("Sign in to Steam in Madeira before starting Dock.")
                 }
-                try MadeiraDock.writeHandoff(account: signIn.accountName, token: signIn.refreshToken, appID: game.id)
+                try MadeiraDock.writeHandoff(account: signIn.accountName, token: signIn.refreshToken, appID: game.id, clientOnly: game.local)
             } catch { fail(error); return }
-            MadeiraDock.configure(game, launchOption: launchOption)
+            MadeiraDock.configure(game, launchOption: launchOption,
+                                  localProgram: game.local ? profile?.launchWindowsPath : nil,
+                                  localDirectory: game.local ? profile?.launchDirectory : nil)
             // The game's one-time installs (its Steam install script) run first, in the same
             // session. No session runs yet, so the registry files can be read and written.
-            DockInstallers.prepare(game, drive: MadeiraDock.drive, prefix: MadeiraDock.prefix)
+            if game.local { DockInstallers.prepareLocal() }
+            else { DockInstallers.prepare(game, drive: MadeiraDock.drive, prefix: MadeiraDock.prefix) }
             // Only a start that runs installers turns madsync off, for its own session
             // (build/madsync/madsync.c reads MADEIRA_MADSYNC_SESSION once, when the server starts).
             if DockInstallers.serverSync {

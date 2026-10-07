@@ -307,6 +307,7 @@ struct LibraryEntry: Codable, Identifiable {
     /// Dock, the default; "game" is the game's own program in Wine, without Steam
     /// (SteamDirectStart).
     var steamStart: String?
+    var localDock: Bool?
     /// "The game": the program, relative to the install folder ("bin/game.exe"), its
     /// arguments, and its working folder (relative to the install folder; nil: the
     /// program's own folder, "": the install folder), from Steam's launch configuration
@@ -435,7 +436,7 @@ struct LibraryEntry: Codable, Identifiable {
     /// ml1163's launch options apply to what the library starts itself: a game you
     /// added, or a Steam game's "The game". A Steam game started through Madeira
     /// Dock has Dock's own desktop and command (ContentView.startDock).
-    var usesLaunchOptions: Bool { desktop != true && (steamAppID == nil || startsSteamGameDirectly) }
+    var usesLaunchOptions: Bool { desktop != true && !startsLocalGameWithDock && (steamAppID == nil || startsSteamGameDirectly) }
     /// ml1163: a game (not the Desktop entry) started inside the Wine desktop.
     var runsInDesktop: Bool { usesLaunchOptions && launchMode == "desktop" }
     /// The program's own arguments: Steam's launch configuration for "The game",
@@ -544,6 +545,7 @@ struct LibraryEntry: Codable, Identifiable {
 
     /// A Steam game that starts as its own program ("Start with: The game").
     var startsSteamGameDirectly: Bool { steamAppID != nil && steamStart == "game" }
+    var startsLocalGameWithDock: Bool { desktop != true && steamAppID == nil && localDock == true }
     /// What a launch starts, relative to drive_c: "The game"'s program inside the
     /// install folder, else `relativePath`.
     var launchRelativePath: String {
@@ -702,6 +704,10 @@ struct LibraryEntry: Codable, Identifiable {
         // "The game"'s identity and the launch's working folder, for this launch only
         // (the bridge reads and clears them); every other launch starts without them.
         unsetenv("MADEIRA_STEAM_APPID"); unsetenv("MADEIRA_STEAM_APPPATH"); unsetenv("MADEIRA_WORKDIR")
+        if startsLocalGameWithDock {
+            GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: sessionRenderResolution)
+            return
+        }
         if steamAppID != nil {
             // A Steam game through Madeira Dock: Dock has set what starts (ContentView.startDock);
             // the virtual monitor follows this entry's Resolution, as below. "The game" starts
@@ -3126,6 +3132,14 @@ struct LibraryDetail: View {
                 if let appID = entry.steamAppID {
                     SteamCloudSection(appID: appID)
                     SteamEntrySection(entry: $entry) { leaving = true; dismiss() }
+                }
+                if entry.desktop != true && entry.steamAppID == nil && MadeiraDock.enabled {
+                    Section("Start") {
+                        Picker("Start with", selection: Binding(get: { entry.localDock == true }, set: { entry.localDock = $0 ? true : nil })) {
+                            Text("The game").tag(false)
+                            Text("Madeira Dock").tag(true)
+                        }.pickerStyle(.menu)
+                    }
                 }
                 Section {
                     // The Windows screen the game renders for (and the Desktop's size).

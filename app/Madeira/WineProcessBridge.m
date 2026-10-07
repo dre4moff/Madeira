@@ -1920,6 +1920,31 @@ int madeira_write_continue_flag(void) {
 #include <errno.h>
 #include <fcntl.h>
 #include <mach/mach.h>
+
+
+#include "../../madeira-d3d12/src/texture_memory_policy.h"
+
+uint32_t madeira_texture_memory_headroom_mb(uint32_t start_mb)
+{
+    if (start_mb != 2048 && start_mb != 4096) return 0;
+    task_vm_info_data_t vmi;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vmi, &count) != KERN_SUCCESS) return 0;
+    uint64_t available = os_proc_available_memory();
+    if (!available) return 0;
+    uint64_t budget = vmi.phys_footprint + available;
+    // Use the same physical-RAM reserve as WineMetal's headroom query, so the
+    // trigger has the same meaning on devices whose process limit exceeds RAM.
+    uint64_t memory = 0;
+    size_t length = sizeof memory;
+    long long reserve_mb = madeira_cfg_int("ram-reserve-mb", 1536);
+    if (reserve_mb > 0 && !sysctlbyname("hw.memsize", &memory, &length, NULL, 0)
+        && memory > ((uint64_t)reserve_mb << 20)) {
+        uint64_t cap = memory - ((uint64_t)reserve_mb << 20);
+        if (budget > cap) budget = cap;
+    }
+    return mad_texture_headroom_mb(start_mb, budget);
+}
 static void mc_sample(const char *mode, const char *phase, uint64_t *fp_out) {
     task_vm_info_data_t v; mach_msg_type_number_t n = TASK_VM_INFO_COUNT;
     memset(&v, 0, sizeof v);

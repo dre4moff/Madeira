@@ -1,17 +1,20 @@
 # Fork release and personal runtime setup
 
-Release: `v0.1.3-fork-r33`, based on official Madeira `v0.1.3` plus every upstream `main` change through `48f9764`. This is an
+Release: `v0.1.3-fork-r34`, based on official Madeira `v0.1.3` plus every upstream `main` change through `48f9764`. This is an
 unofficial, experimental prerelease. The app is optimized Release (`-O2` native,
-`-O` whole-module Swift), build 18, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
+`-O` whole-module Swift), build 19, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
 Manual cache cleanup, the negative cache-disabled trial and remaining movement stutters are explained in [the developer report](R31_PERFORMANCE_REPORT.md).
 The public IPA is unsigned; it needs personal signing/sideloading and JIT.
 
-The r33 patch adds the stock Wine `wintypes.dll` to both 64-bit farms for WinRT
-input initialization. See [the log diagnosis and validation](R33_WINRT_INPUT_STARTUP.md).
+The r34 game details menu adds **Texture memory saving: Off / 4 GB / 2 GB**
+for DXMT (DirectX 11) and Madeira DirectX 12. Try it only if loading a game or
+map with large textures makes the app close. 2 GB begins reducing eligible
+textures earlier than 4 GB; it can cost detail. These are memory-use triggers,
+not hard RAM limits. See [behavior and validation](R34_TEXTURE_MEMORY_OPTIONS.md).
 
 ## Install
 
-1. Download `Madeira-0.1.3-Fork-r33-Release-unsigned.ipa` from
+1. Download `Madeira-0.1.3-Fork-r34-Release-unsigned.ipa` from
    [this fork's releases](https://github.com/dre4moff/Madeira/releases).
 2. For games needing Microsoft native VC++ runtime, first prepare your personal
    IPA as below. Microsoft binaries are deliberately absent from public assets.
@@ -43,9 +46,9 @@ Run on macOS with Python 3:
 
 ```sh
 python3 tools/prepare-vcruntime-ipa.py \
-  --ipa /path/to/Madeira-0.1.3-Fork-r33-Release-unsigned.ipa \
+  --ipa /path/to/Madeira-0.1.3-Fork-r34-Release-unsigned.ipa \
   --runtime-dir /path/to/your/unmodified-x64-runtime \
-  --output /path/to/Madeira-r33-personal-unsigned.ipa
+  --output /path/to/Madeira-r34-personal-unsigned.ipa
 ```
 
 The helper checks x64 PE headers and intact certificate ranges, preserves DLL
@@ -58,7 +61,7 @@ about app extensions; built-in JIT requires it. See [JIT setup](JIT.md). These p
 ## Source and rebuilding
 
 ```sh
-git clone --recurse-submodules --branch v0.1.3-fork-r33 \
+git clone --recurse-submodules --branch v0.1.3-fork-r34 \
   https://github.com/dre4moff/Madeira.git
 ```
 

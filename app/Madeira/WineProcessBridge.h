@@ -26,6 +26,9 @@ void wine_exit_status_reset(void);
 // Local MetalFX capability, without starting Wine or changing the renderer.
 int madeira_supports_spatial_upscaling(void);
 int madeira_supports_temporal_upscaling(void);
+// Convert a per-game memory-use trigger into DXMT's distance below the process
+// budget. Zero means unavailable/invalid. Does not allocate or change limits.
+uint32_t madeira_texture_memory_headroom_mb(uint32_t start_mb);
 
 // Steam S0 net-test VPN gate: write C:\madeira-continue.flag into the
 // prefix's drive_c so the paused winhttp-test.exe resumes to the Steam

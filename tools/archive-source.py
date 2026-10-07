@@ -12,7 +12,7 @@ import zipfile
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--output', type=Path, required=True)
-p.add_argument('--prefix', default='Madeira-r33')
+p.add_argument('--prefix', default='Madeira-r34')
 a = p.parse_args()
 root = Path(__file__).resolve().parents[1]
 modules = []
@@ -65,7 +65,7 @@ with zipfile.ZipFile(a.output, 'x', compression=zipfile.ZIP_DEFLATED, compressle
         'Root commit: ' + revision + '\nAll tracked sources and recursive source dependencies are included at their exact pins.\n'
         'Optional precompiled FEX test suites are represented by their original pins. No runtime feature is omitted.\n'
         'Wine Mono corresponding source is supplied as wine-mono-11.0.0-src.tar.xz alongside this archive.\n'
-        'See docs/BUILDING.md and docs/R33_WINRT_INPUT_STARTUP.md for the verified build and validation.\n')
+        'See docs/BUILDING.md and docs/R34_TEXTURE_MEMORY_OPTIONS.md for the verified build and validation.\n')
 with zipfile.ZipFile(a.output) as target:
     assert target.testzip() is None
 print(json.dumps({'file': str(a.output), 'root_commit': revision, 'modules': len(modules), 'bytes': a.output.stat().st_size}))

@@ -1,3 +1,4 @@
+from library_host_fixture import texture_memory_profile_fields, madeira_config_parser
 from library_host_fixture import resolution_choices
 """Host-only tests of the real LibraryEntry stored fields; never starts Wine."""
 from pathlib import Path
@@ -9,7 +10,7 @@ content_actions = (root / 'app/Madeira/ContentView.swift').read_text()
 control_action = content_actions[content_actions.index('enum ControlAction:'):content_actions.index('/// One on-screen control.')]
 
 source = (root / "app/Madeira/Library.swift").read_text()
-fields = source[source.index("struct LibraryEntry: Codable, Identifiable {"):source.index("    var displayMode: DisplayMode")]
+fields = source[source.index("struct LibraryEntry: Codable, Identifiable {"):source.index("    var displayMode: DisplayMode")] + texture_memory_profile_fields()
 test = r'''
 import Foundation
 // On-screen controls are unrelated to this test; old fixtures contain none.
@@ -38,6 +39,8 @@ assert(off.nativeVCRuntime == false)
 print("PASS: old library compatibility, persistence, per-game isolation and disabling")
 '''
 test = resolution_choices() + test
+
+test = madeira_config_parser() + test
 
 with tempfile.TemporaryDirectory(prefix="madeira-profile-test-") as tmp:
     path = Path(tmp) / "main.swift"

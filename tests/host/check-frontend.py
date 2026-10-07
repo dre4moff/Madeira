@@ -89,6 +89,7 @@ final class PassthroughSubject<Output, Failure: Error> {
 }
 #endif
 enum MadeiraConfig {
+''' + block((root / 'app/Madeira/MadeiraConfig.swift').read_text(), '    static func parse(_ text: String)') + r'''
     static var values: [String: String] = [:]   // stands in for madeira.cfg
     static func flag(_ name: String, fallback: Bool = true) -> Bool { fallback }
     static func get(_ key: String) -> String? { values[key] }

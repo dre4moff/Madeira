@@ -357,10 +357,69 @@ struct LibraryEntry: Codable, Identifiable {
         var lines: [String] = []
         if let metalFXUpscale { lines.append("metalfx-upscale = \(metalFXUpscale)") }
         if let config, !config.isEmpty { lines.append(config) }
+        // Extend the already tested r33 DXMT profile to D3D12 at launch.
+        if textureMemoryStartMB > 0,
+           MadeiraConfig.parse(config ?? "")["texture-memory-start-mb"] == nil {
+            lines.append("texture-memory-start-mb = \(textureMemoryStartMB)")
+        }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
     var displayMode: DisplayMode { display.flatMap(DisplayMode.init(rawValue:)) ?? .fit }
+
+    /// The tested texture-memory preset lives in the game's existing config,
+    /// so manually saved profiles are recognized without a library migration.
+    private var textureMemoryOptions: [String] {
+        (MadeiraConfig.parse(config ?? "")["dxmt"] ?? "")
+            .split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Memory-use trigger, not a memory cap. Zero leaves the renderer's defaults.
+    var textureMemoryStartMB: Int {
+        get {
+            if let value = MadeiraConfig.parse(config ?? "")["texture-memory-start-mb"],
+               let mb = Int(value), [2048, 4096].contains(mb) { return mb }
+            var options: [String: String] = [:]
+            for option in textureMemoryOptions where !option.hasPrefix("#") {
+                guard let eq = option.firstIndex(of: "=") else { continue }
+                options[String(option[..<eq]).trimmingCharacters(in: .whitespaces)] =
+                    String(option[option.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+            }
+            return options["d3d11.mipClampAuto"] == "1" && options["d3d11.mipClampAutoMB"] == "4096" ? 4096 : 0
+        }
+        set {
+            let managed = ["d3d11.mipClampAuto", "d3d11.mipClampAutoMB"]
+            let options = textureMemoryOptions.filter { option in
+                guard !option.hasPrefix("#"), let eq = option.firstIndex(of: "=") else { return true }
+                return !managed.contains(String(option[..<eq]).trimmingCharacters(in: .whitespaces))
+            }
+            var lines: [String] = []
+            var insertion: Int?
+            for line in (config ?? "").components(separatedBy: .newlines) {
+                let text = line.trimmingCharacters(in: .whitespaces)
+                if !text.hasPrefix("#"), let eq = text.firstIndex(of: "=") {
+                    let key = text[..<eq].trimmingCharacters(in: .whitespaces)
+                    if key == "dxmt" {
+                        if insertion == nil { insertion = lines.count }
+                    } else if key != "texture-memory-start-mb" {
+                        lines.append(line)
+                    }
+                } else {
+                    lines.append(line)
+                }
+            }
+            while lines.last?.isEmpty == true { lines.removeLast() }
+            if !options.isEmpty {
+                lines.insert("dxmt = " + options.joined(separator: ";"), at: min(insertion ?? lines.count, lines.count))
+            }
+            if [2048, 4096].contains(newValue) {
+                lines.append("texture-memory-start-mb = \(newValue)")
+            }
+            let text = lines.joined(separator: "\n")
+            config = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+        }
+    }
 
     var launchArguments: String {
         if desktop == true { return "/desktop=shell,\(resolution) C:\\windows\\system32\\services.exe" }
@@ -3164,6 +3223,14 @@ struct LibraryDetail: View {
                         set: { entry.forceDirectX11 = $0 }
                     ))
                     Text("Request DirectX 11 with -dx11 at the next launch, including Steam games. The game must support DirectX 11; turn off to use its default renderer.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Picker("Texture memory saving", selection: $entry.textureMemoryStartMB) {
+                        Text("Off").tag(0)
+                        Text("4 GB").tag(4096)
+                        Text("2 GB").tag(2048)
+                    }
+                    .pickerStyle(.menu)
+                    Text("Try this only if a game with high texture memory use makes Madeira close, especially while loading a map. Starts reducing large texture detail near the selected app memory use; device memory pressure may make it start sooner. 2 GB starts earlier and may reduce more texture detail. This is a trigger, not a memory cap. Works with DXMT (DirectX 11) and Madeira DirectX 12. Applies at the next launch.")
                         .font(.caption).foregroundStyle(.secondary)
                         Toggle("DLSS via MetalFX (experimental)", isOn: Binding(
                             get: { entry.metalFXDLSS ?? false }, set: { entry.metalFXDLSS = $0 }

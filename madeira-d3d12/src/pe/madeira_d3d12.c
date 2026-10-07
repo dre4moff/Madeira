@@ -21,6 +21,7 @@
 #include <windows.h>
 #include <d3d12.h>
 #include "read_barrier_policy.h"
+#include "texture_memory_policy.h"
 #include <dxgi1_5.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -583,7 +584,7 @@ struct mad_resource {
      * "Invalid texture type MTLTextureType2D bound to shader, expected
      * MTLTextureType2DArray", 6520 reports in one run). Views are cached per
      * (type, levels, slices). */
-    enum WMTTextureType tex_type; enum WMTPixelFormat tex_pf; UINT tex_mips, tex_layers; UINT tex_depth;   /* ml924: 3D depth */
+    enum WMTTextureType tex_type; enum WMTPixelFormat tex_pf; UINT tex_mips, tex_layers; UINT mip_bias; UINT tex_depth;   /* ml924: 3D depth */
     struct mad_xview { UINT type, lvl0, nlvl, sl0, nsl, pf, swz; obj_handle_t tex; UINT64 id; } *xview;
     unsigned nxview, xview_cap;
     UINT64 reserved_bytes;   /* d3d12-tiled-resources: created by CreateReservedResource (fully backed), its tiles x 64 KB */
@@ -6524,7 +6525,8 @@ static UINT64 mad_texture_view_id(struct mad_device *d, struct mad_resource *r, 
     if (!r->texture) return 0;
     if (!swz) swz = MAD_SWZ_IDENTITY;
     if (!pf || (r->is_depth && pf != WMTPixelFormatX32_Stencil8)) pf = r->tex_pf;   /* depth textures keep their format: sampled as depth; ml1101: unless a stencil view */
-    if (nlvl == 0 || nlvl == ~0u || lvl0 + nlvl > r->tex_mips) nlvl = r->tex_mips > lvl0 ? r->tex_mips - lvl0 : 1;
+    if (r->mip_bias) mad_texture_view_levels(r->mip_bias, r->tex_mips, &lvl0, &nlvl);
+    else if (nlvl == 0 || nlvl == ~0u || lvl0 + nlvl > r->tex_mips) nlvl = r->tex_mips > lvl0 ? r->tex_mips - lvl0 : 1;
     if (nsl == 0 || nsl == ~0u || sl0 + nsl > r->tex_layers) nsl = r->tex_layers > sl0 ? r->tex_layers - sl0 : 1;
     if (want == r->tex_type && lvl0 == 0 && nlvl == r->tex_mips && sl0 == 0 && nsl == r->tex_layers && pf == r->tex_pf && swz == MAD_SWZ_IDENTITY)
         return r->gpu_resource_id;
@@ -7515,16 +7517,37 @@ static int mad_texinfo_from_desc(const D3D12_RESOURCE_DESC *desc, struct WMTText
     ti->options = WMTResourceStorageModePrivate;
     return 1;
 }
-static HRESULT mad_create_resource_at(struct mad_device *d, D3D12_HEAP_TYPE heap_type,
-                                      const D3D12_RESOURCE_DESC *desc, REFIID riid, void **out,
-                                      struct mad_memheap *ph, UINT64 poff);
-static HRESULT mad_create_resource(struct mad_device *d, D3D12_HEAP_TYPE heap_type,
-                                   const D3D12_RESOURCE_DESC *desc, REFIID riid, void **out) {
-    return mad_create_resource_at(d, heap_type, desc, riid, out, NULL, 0);
+/* Large sampled BC textures only. GetDesc and copy footprints remain logical;
+ * uploads and SRV ranges translate to the retained physical mip chain. */
+static UINT mad_texture_mip_bias(D3D12_HEAP_TYPE heap_type, const D3D12_RESOURCE_DESC *desc,
+                                int allow_texture_saving) {
+    struct madeira_ctl_args a;
+    UINT bytes, block;
+    long long start_mb;
+    if (!allow_texture_saving || heap_type != D3D12_HEAP_TYPE_DEFAULT ||
+        desc->Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc->Flags ||
+        desc->Layout != D3D12_TEXTURE_LAYOUT_UNKNOWN || desc->SampleDesc.Count != 1 ||
+        desc->MipLevels < 2 || (desc->Width < 1024 && desc->Height < 1024)) return 0;
+    mad_format_info(desc->Format, &bytes, &block);
+    if (block != 4 || ((desc->Width >> 1) & 3) || ((desc->Height >> 1) & 3) ||
+        desc->Width < 8 || desc->Height < 8) return 0;
+    start_mb = mad_cfg_int_pe("texture-memory-start-mb", 0);
+    if (start_mb != 2048 && start_mb != 4096) return 0;
+    memset(&a, 0, sizeof a); a.op = 7; MadeiraCtl(&a);
+    /* No local process budget in remote mode or when iOS cannot report it. */
+    if (!a.ret || !a.len) return 0;
+    return (a.len >> 20) < mad_texture_headroom_mb((uint32_t)start_mb, a.ptr + a.len) ? 1 : 0;
 }
 static HRESULT mad_create_resource_at(struct mad_device *d, D3D12_HEAP_TYPE heap_type,
                                       const D3D12_RESOURCE_DESC *desc, REFIID riid, void **out,
-                                      struct mad_memheap *ph, UINT64 poff) {
+                                      struct mad_memheap *ph, UINT64 poff, int allow_texture_saving);
+static HRESULT mad_create_resource(struct mad_device *d, D3D12_HEAP_TYPE heap_type,
+                                   const D3D12_RESOURCE_DESC *desc, REFIID riid, void **out) {
+    return mad_create_resource_at(d, heap_type, desc, riid, out, NULL, 0, 0);
+}
+static HRESULT mad_create_resource_at(struct mad_device *d, D3D12_HEAP_TYPE heap_type,
+                                      const D3D12_RESOURCE_DESC *desc, REFIID riid, void **out,
+                                      struct mad_memheap *ph, UINT64 poff, int allow_texture_saving) {
     struct mad_resource *r;
     HRESULT hr;
     if (desc->Dimension == D3D12_RESOURCE_DIMENSION_UNKNOWN) { mad_refuse_log(desc, heap_type, "dimension UNKNOWN"); return E_INVALIDARG; }
@@ -7542,6 +7565,15 @@ static HRESULT mad_create_resource_at(struct mad_device *d, D3D12_HEAP_TYPE heap
         enum WMTPixelFormat pf;
         int is_depth;
         if (!mad_texinfo_from_desc(desc, &ti, &pf, &is_depth)) { free(r); mad_refuse_log(desc, heap_type, "texture format has no Metal mapping"); return E_NOTIMPL; }
+        r->mip_bias = mad_texture_mip_bias(heap_type, desc, allow_texture_saving);
+        if (r->mip_bias) {
+            ti.width >>= r->mip_bias; ti.height >>= r->mip_bias;
+            ti.mipmap_level_count -= r->mip_bias;
+            static LONG said;
+            if (InterlockedIncrement(&said) <= 16)
+                d3d12_log("[texture-memory] D3D12 %llu x %u -> %u x %u, %u retained mips\n",
+                          (unsigned long long)desc->Width, desc->Height, ti.width, ti.height, ti.mipmap_level_count);
+        }
         if (ph && ph->mtl) {   /* ml1145: inside the application's heap, at its offset */
             UINT64 psz = 0, pal = 0;
             MTLDevice_heapTextureSizeAndAlign(d->mtl_device, &ti, &psz, &pal);
@@ -7678,7 +7710,8 @@ static HRESULT STDMETHODCALLTYPE device_CreateCommittedResource(ID3D12Device *Th
     HRESULT hr;
     static unsigned said;
     if (!heap || !desc || !out) { if (said++ < 8) d3d12_log("[madeira-d3d12] CreateCommittedResource: null props/desc/out\n"); return E_INVALIDARG; }
-    hr = mad_create_resource((struct mad_device *)This, heap->Type, desc, riid, out);
+    hr = mad_create_resource_at((struct mad_device *)This, heap->Type, desc, riid, out, NULL, 0,
+                                !(heap_flags & (D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER)));
     if (desc->Width >= (32u << 20) && desc->Dimension == D3D12_RESOURCE_DIMENSION_BUFFER && said++ < 64)
         d3d12_log("[madeira-d3d12] committed: %llu MB flags %#x heap-type %u -> hr %#lx\n",
                   (unsigned long long)(desc->Width >> 20), (unsigned)desc->Flags, (unsigned)heap->Type, (unsigned long)hr);
@@ -7784,7 +7817,7 @@ static HRESULT STDMETHODCALLTYPE device_CreatePlacedResource(ID3D12Device *This,
     static unsigned said;
     (void)state; (void)clear;
     if (!h || !desc || !out) { if (said++ < 8) d3d12_log("[madeira-d3d12] CreatePlacedResource: null heap/desc/out\n"); return E_INVALIDARG; }
-    hr = mad_create_resource_at((struct mad_device *)This, h->desc.Properties.Type, desc, riid, out, h, offset);   /* ml1145 */
+    hr = mad_create_resource_at((struct mad_device *)This, h->desc.Properties.Type, desc, riid, out, h, offset, 0);   /* ml1145 */
     /* ml895: every placement inside a TRANSIENT heap (4 MB aligned, NOT_ZEROED)
      * with the list sequence, so a heap's occupancy can be replayed offline.
      * The RenderThread fault behind every menu crash is UE's transient
@@ -11233,11 +11266,13 @@ static void STDMETHODCALLTYPE list_CopyTextureRegion(ID3D12GraphicsCommandList *
     if (!d || !s) return;
     if (d->texture && !s->texture) {           /* upload: buffer -> texture */
         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT *f = &src->PlacedFootprint;
-        UINT w, h, dd;
+        UINT w, h, dd, level, slice, plane;
+        mad_subresource_plane(d, dst->SubresourceIndex, &level, &slice, &plane);
+        mad_mip_dims(d, level, &w, &h, &dd);
+        if (!mad_texture_copy_level(d->mip_bias, &level)) return;
         c = mad_list_push(l, MC_COPY_B2T);
         if (!c) return;
-        mad_subresource_plane(d, dst->SubresourceIndex, &c->u.bt.level, &c->u.bt.slice, &c->u.bt.plane);
-        mad_mip_dims(d, c->u.bt.level, &w, &h, &dd);
+        c->u.bt.level = level; c->u.bt.slice = slice; c->u.bt.plane = plane;
         mad_format_info(d->desc.Format, &bytes, &block);
         c->u.bt.tex = d; c->u.bt.buf = s; c->u.bt.off = f->Offset;
         c->u.bt.w = f->Footprint.Width ? f->Footprint.Width : w;
@@ -11259,11 +11294,13 @@ static void STDMETHODCALLTYPE list_CopyTextureRegion(ID3D12GraphicsCommandList *
     }
     if (s->texture && !d->texture) {           /* readback: texture -> buffer */
         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT *f = &dst->PlacedFootprint;
-        UINT w, h, dd;
+        UINT w, h, dd, level, slice, plane;
+        mad_subresource_plane(s, src->SubresourceIndex, &level, &slice, &plane);
+        mad_mip_dims(s, level, &w, &h, &dd);
+        if (!mad_texture_copy_level(s->mip_bias, &level)) return;
         c = mad_list_push(l, MC_COPY_T2B);
         if (!c) return;
-        mad_subresource_plane(s, src->SubresourceIndex, &c->u.bt.level, &c->u.bt.slice, &c->u.bt.plane);
-        mad_mip_dims(s, c->u.bt.level, &w, &h, &dd);
+        c->u.bt.level = level; c->u.bt.slice = slice; c->u.bt.plane = plane;
         mad_format_info(s->desc.Format, &bytes, &block);
         c->u.bt.tex = s; c->u.bt.buf = d; c->u.bt.off = f->Offset;
         c->u.bt.w = w; c->u.bt.h = h; c->u.bt.d = dd;
@@ -11279,12 +11316,15 @@ static void STDMETHODCALLTYPE list_CopyTextureRegion(ID3D12GraphicsCommandList *
         return;
     }
     if (s->texture && d->texture) {            /* texture -> texture */
-        UINT w, h, dd;
+        UINT w, h, dd, dl, ds, dp, sl, ss, sp;
+        mad_subresource_plane(d, dst->SubresourceIndex, &dl, &ds, &dp);
+        mad_subresource_plane(s, src->SubresourceIndex, &sl, &ss, &sp);
+        mad_mip_dims(s, sl, &w, &h, &dd);
+        if (!mad_texture_copy_level(d->mip_bias, &dl) || !mad_texture_copy_level(s->mip_bias, &sl)) return;
         c = mad_list_push(l, MC_COPY_T2T);
         if (!c) return;
-        mad_subresource_plane(d, dst->SubresourceIndex, &c->u.tt.dlevel, &c->u.tt.dslice, &c->u.tt.dplane);
-        mad_subresource_plane(s, src->SubresourceIndex, &c->u.tt.slevel, &c->u.tt.sslice, &c->u.tt.splane);
-        mad_mip_dims(s, c->u.tt.slevel, &w, &h, &dd);
+        c->u.tt.dlevel = dl; c->u.tt.dslice = ds; c->u.tt.dplane = dp;
+        c->u.tt.slevel = sl; c->u.tt.sslice = ss; c->u.tt.splane = sp;
         c->u.tt.dst = d; c->u.tt.src = s;
         c->u.tt.dx = x; c->u.tt.dy = y; c->u.tt.dz = z;
         c->u.tt.w = w; c->u.tt.h = h; c->u.tt.d = dd;

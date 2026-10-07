@@ -1,4 +1,4 @@
-# Complete fork changes — Madeira 0.1.3 / r33
+# Complete fork changes — Madeira 0.1.3 / r34
 
 This unofficial fork is based on Will Faust's official `v0.1.3`
 (`4e9d45a74294cd820120791c4b3f2b79adf4fc70`). Original copyright and licenses
@@ -6,6 +6,21 @@ are retained. Fork changes were prepared with AI assistance and are offered
 for inspection, not as an upstream endorsement or a guaranteed FPS increase.
 The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
+
+## r34 — Per-game texture memory saving
+
+- Add Off / 4 GB / 2 GB in game details for DXMT and Madeira DirectX 12.
+  Reduce eligible large sampled BC textures by one mip once app memory use
+  crosses the selected trigger, or sooner under device memory pressure.
+- Recognize the tested r33 Supermarket Together profile without changing
+  the library format; preserve unrelated per-game configuration and MetalFX.
+- Translate D3D12 mip uploads, readback, copies and SRV ranges while retaining
+  logical resource descriptions and footprint pitches. Exclude application
+  placed/reserved/shared textures, render targets, depth and UAV resources.
+- Optimized Release build 19, 19 focused passing host suites and verified final
+  payload. The user confirmed map entry with the r33 DXMT 4 GiB-equivalent fix;
+  the new menu, 2 GiB trigger and D3D12 rendering require device retesting.
+  See [r34 behavior and validation](R34_TEXTURE_MEMORY_OPTIONS.md).
 
 ## r33 — WinRT input startup dependency
 

@@ -43,6 +43,9 @@ INT_READERS = {"madeira_cfg_int", "mad_cfg_int_pe"}
 # Titles, kinds and fixed choices for options with a dedicated Settings row.
 # "choices" are (value, label); the empty value means "remove the key".
 OVERLAY = {
+    "texture-memory-start-mb": {"title": "Texture memory saving", "kind": "choice", "default": "0", "category": "Graphics",
+                "note": "Try the per-game Texture memory saving menu when loading large textures makes the app close. 4096 or 2048 starts dropping one large sampled BC mip near that app memory use; normal pressure may start sooner. This is a trigger, not a RAM cap. The game menu applies it to DXMT and Madeira DirectX 12; this raw key is read directly by D3D12.",
+                "choices": [("", "Off"), ("4096", "4 GB"), ("2048", "2 GB")]},
     "env.MADEIRA_SWAP_EPHEMERAL": {"title": "Release swap storage on exit", "kind": "bool", "default": "1", "category": "Memory & JIT pool",
                 "note": "Detach the app-created swap backing after opening it. Its active mappings remain usable; storage is reclaimed automatically on exit or crash. 0 keeps the named temporary file until a later clean-up.",
                 "sources": ["build/ntdll-unix/ephemeral_swap.h", "app/Madeira/WineProcessBridge.m"]},

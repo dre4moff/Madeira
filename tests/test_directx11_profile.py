@@ -1,3 +1,4 @@
+from library_host_fixture import texture_memory_profile_fields, madeira_config_parser
 from library_host_fixture import resolution_choices
 """Host-only DirectX 11 tests. No client DLL, game or Wine process is executed."""
 from pathlib import Path
@@ -11,7 +12,7 @@ control_action = content_actions[content_actions.index('enum ControlAction:'):co
 
 library = (root / "app/Madeira/Library.swift").read_text()
 helper = library[library.index("enum LibraryLaunchArguments {"):library.index("struct LibraryEntry:")]
-fields = library[library.index("struct LibraryEntry: Codable, Identifiable {"):library.index("    var displayMode:")]
+fields = library[library.index("struct LibraryEntry: Codable, Identifiable {"):library.index("    var displayMode:")] + texture_memory_profile_fields()
 computed = library[library.index("    var launchArguments: String {"):library.index('    /// Runs on the launch worker')]
 computed = re.sub(r"    var effectiveFPSMode: Int32 .*\n", "", computed)
 swift = "import Foundation\nstruct TouchControl: Codable {}\nenum LibraryError: Error {case message(String)}\n" + control_action + helper + fields + computed + r'''
@@ -135,6 +136,8 @@ int main(void) {
 }
 '''
 swift = resolution_choices() + swift
+
+swift = madeira_config_parser() + swift
 
 with tempfile.TemporaryDirectory(prefix="madeira-dx11-test-") as tmp:
     tmp = Path(tmp)

@@ -2808,6 +2808,19 @@ struct ContentView: View {
                     logStore.log("DXMT config: \(parts.joined(separator: ";")) via \(source) (\(parts.count) option\(parts.count == 1 ? "" : "s"))")
                 }
             }
+            if let startMB = profile?.textureMemoryStartMB, startMB > 0 {
+                let headroomMB = madeira_texture_memory_headroom_mb(UInt32(startMB))
+                if headroomMB > 0 {
+                    dxmtOptions.removeAll { option in
+                        let key = option.split(separator: "=", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces)
+                        return key == "d3d11.mipClampAuto" || key == "d3d11.mipClampAutoMB"
+                    }
+                    dxmtOptions += ["d3d11.mipClampAuto=1", "d3d11.mipClampAutoMB=\(headroomMB)"]
+                    logStore.log("Texture memory saving: start near \(startMB)MB used, headroom threshold \(headroomMB)MB")
+                } else {
+                    logStore.log("Texture memory saving: memory budget unavailable; preset not applied", level: .error)
+                }
+            }
             // MetalFX spatial upscaling (metalfx-upscale; Game details › MetalFX
             // upscaling writes it to the game's own lines). The D3D12 runtime reads
             // the key itself; D3D11 games get DXMT's MetalFX swapchain at the same

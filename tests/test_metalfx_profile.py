@@ -1,3 +1,4 @@
+from library_host_fixture import texture_memory_profile_fields, madeira_config_parser
 from library_host_fixture import resolution_choices, control_action
 """Actual saved-profile sizing and renderer settings; host-only fixtures."""
 from pathlib import Path
@@ -5,7 +6,7 @@ import subprocess,tempfile
 root=Path(__file__).resolve().parents[1]
 s=(root/'app/Madeira/Library.swift').read_text()
 helper=s[s.index('enum LibraryMetalFX {'):s.index('\nstruct LibraryEntry:')]
-fields=s[s.index('struct LibraryEntry:'):s.index('    var displayMode: DisplayMode')]
+fields=s[s.index('struct LibraryEntry:'):s.index('    var displayMode: DisplayMode')] + texture_memory_profile_fields()
 swift='import Foundation\nstruct TouchControl: Codable {}\n'+control_action()+helper+fields+'}\n'+r'''
 let size = LibraryMetalFX.renderResolution
 assert(size("1408x648", "balanced", true) == "1408x648")
@@ -46,6 +47,8 @@ int main(void) {
 }
 '''
 swift = resolution_choices() + swift
+
+swift = madeira_config_parser() + swift
 
 with tempfile.TemporaryDirectory(prefix='madeira-metalfx-') as tmp:
  p=Path(tmp);(p/'main.swift').write_text(swift);(p/'profile.c').write_text(c)

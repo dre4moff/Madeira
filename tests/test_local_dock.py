@@ -37,6 +37,13 @@ typedef unsigned char BYTE;
 typedef void *HANDLE;
 typedef struct { HANDLE hProcess, hThread; } PROCESS_INFORMATION;
 typedef struct { DWORD cb; } STARTUPINFOW;
+typedef struct { struct { DWORD LimitFlags; } BasicLimitInformation; } JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
+typedef struct { DWORD ActiveProcesses; } JOBOBJECT_BASIC_ACCOUNTING_INFORMATION;
+#define JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE 8192
+#define JobObjectExtendedLimitInformation 9
+#define JobObjectBasicAccountingInformation 1
+#define CREATE_SUSPENDED 4
+
 #define WINAPI
 #define TRUE 1
 #define FALSE 0
@@ -91,9 +98,22 @@ static DWORD GetFileAttributesW(const wchar_t *name) {
     if (!wcscmp(name,L"C:\\Games")) return scenario == 4 ? 0 : FILE_ATTRIBUTE_DIRECTORY;
     return 0;
 }
+static HANDLE CreateJobObjectW(void *attributes, const wchar_t *name) { assert(!attributes && !name); return (HANDLE)7; }
+static BOOL SetInformationJobObject(HANDLE job, int kind, void *data, DWORD size) {
+    assert(job == (HANDLE)7 && kind == JobObjectExtendedLimitInformation && size == sizeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+    assert(((JOBOBJECT_EXTENDED_LIMIT_INFORMATION *)data)->BasicLimitInformation.LimitFlags == JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE); return TRUE;
+}
+static BOOL AssignProcessToJobObject(HANDLE job, HANDLE process) { assert(job == (HANDLE)7 && process == (HANDLE)5); return scenario != 9; }
+static DWORD ResumeThread(HANDLE thread) { assert(thread == (HANDLE)6); return 1; }
+static BOOL QueryInformationJobObject(HANDLE job, int kind, void *data, DWORD size, void *returned) {
+    assert(job == (HANDLE)7 && kind == JobObjectBasicAccountingInformation && size == sizeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION) && !returned);
+    ((JOBOBJECT_BASIC_ACCOUNTING_INFORMATION *)data)->ActiveProcesses = waits < (scenario == 8 ? 5 : 3);
+    if (scenario == 6 && waits == 3) registry[0] = 888;
+    return scenario != 10;
+}
 static BOOL CreateProcessW(const wchar_t *app, wchar_t *command, void *a, void *b, BOOL inherit, DWORD flags,
                           void *env, const wchar_t *cwd, STARTUPINFOW *si, PROCESS_INFORMATION *pi) {
-    (void)a; (void)b; assert(!inherit && !flags && !env && si->cb == sizeof(*si));
+    (void)a; (void)b; assert(!inherit && flags == CREATE_SUSPENDED && !env && si->cb == sizeof(*si));
     assert(!wcscmp(app,L"C:\\Games\\Local Fixture.exe") && !wcscmp(cwd,L"C:\\Games"));
     assert(!wcscmp(command,L"\"C:\\Games\\Local Fixture.exe\" \"two words\" --network=&>é"));
     ++creates; if (scenario == 1) return FALSE;
@@ -121,25 +141,29 @@ static DWORD WaitForSingleObject(HANDLE h, DWORD delay) {
     if (!delay) return waits >= 3 ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
     assert(delay == 50); ++waits;
     if (scenario == 3) interrupted = 1;
-    if (scenario == 6 && waits == 3) registry[0] = 888;
+    
     return waits >= 3 ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
 }
+static void sleep_ms(uint32_t delay) { (void)WaitForSingleObject((HANDLE)5, delay); }
 int main(void) {
     struct sh_api api = {.get_callback=get_callback,.free_callback=free_callback};
-    struct sh_observer observer = {.event=event};
-    int expected[] = {0,54,SH_CALLBACK_INVALID,44,53,42,47,53};
-    for (scenario = 0; scenario < 8; ++scenario) {
+    struct sh_observer observer = {.event=event,.sleep_ms=sleep_ms};
+    int expected[] = {0,54,SH_CALLBACK_INVALID,44,53,42,47,53,0,54,54};
+    for (scenario = 0; scenario < 11; ++scenario) {
         registry[0] = 9; registry[1] = 8; registry[2] = 7;
         creates = closes = terminated = waits = pumps = freed = started = 0; interrupted = 0;
         int result = sh_launch_local(&api,&observer,1,1,123);
         assert(result == expected[scenario]);
         if (scenario != 6) assert(registry[0] == 9 && registry[1] == 8 && registry[2] == 7);
         else assert(registry[0] == 888);
-        if (!scenario) assert(creates == 1 && started == 1 && pumps == 6 && freed == 3 && closes == 2 && !terminated);
-        if (scenario == 2 || scenario == 3) assert(terminated == 1 && closes == 2);
+        if (!scenario) assert(creates == 1 && started == 1 && pumps == 8 && freed == 4 && closes == 3 && !terminated);
+        if (scenario == 2 || scenario == 3) assert(terminated == 1 && closes == 3);
         if (scenario == 4 || scenario == 5 || scenario == 7) assert(!creates);
+        if (scenario == 8) assert(waits == 5 && closes == 3 && !terminated && pumps == 12);
+        if (scenario == 9) assert(creates == 1 && !started && terminated == 1 && closes == 3);
+        if (scenario == 10) assert(started == 1 && terminated == 1 && closes == 3);
     }
-    puts("PASS: local process lifetime, callback pumping, Unicode/quoted arguments, creation failure, invalid callbacks, interruption, invalid paths, partial registry rollback and competing Steam registration");
+    puts("PASS: local process lifetime, callback pumping, Unicode/quoted arguments, creation failure, invalid callbacks, interruption, invalid paths, partial registry rollback and competing Steam registration, launcher descendants and job failure cleanup");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='madeira-local-dock-') as folder:

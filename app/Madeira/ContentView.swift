@@ -3358,7 +3358,9 @@ struct ContentView: View {
             let installFolder = MadeiraDock.drive.appendingPathComponent(game.library + "/common/" + game.installDir)
             let chosen = options.flatMap { SteamDirectStart.choose($0, installFolder: installFolder)?.launchIndex }
             let launchOption = chosen ?? 0
-            LogStore.shared.log("[madeira-dock] launch option \(launchOption)\(chosen == nil ? " (none chosen: the default)" : "")")
+            if !game.local {
+                LogStore.shared.log("[madeira-dock] launch option \(launchOption)\(chosen == nil ? " (none chosen: the default)" : "")")
+            }
             await SteamOwnedLibrary.shared.prepareDock()
             do {
                 // The launch state may have changed while the connection closed.
@@ -3421,7 +3423,9 @@ struct ContentView: View {
             // start this session from its own desktop size, not a previous one.
             winios_display_mode_changed(Int32(width), Int32(height))
             MadeiraDock.requestLaunch(compactPool: compactPool)
-            logStore.log("[madeira-dock] starting the host for app \(game.id); Valve's client authenticates and authorizes the launch")
+            logStore.log(game.local
+                ? "[madeira-dock] starting the online client and local program"
+                : "[madeira-dock] starting the host for app \(game.id); Valve's client authenticates and authorizes the launch")
             MadeiraDockModel.shared.watchReport()
             if inLibrary {
                 if let profile { library.begin(profile, dock: game) }

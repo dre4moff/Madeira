@@ -575,9 +575,9 @@ check('Picker("Aspect & scaling"' in detail and 'entry.display = $0' in detail, 
 # starts, its launch arguments, a Home Screen link, its executable. A block gated off
 # for the Desktop must be one of those and hold no other control.
 form_body = detail[:detail.index('.navigationTitle("Game details")')]
-desktop_out = ('Section("Library details")', 'Picker("Start"', 'TextField("Launch arguments"', 'TextField("Custom Launch Arguments"',
+desktop_out = ('Section("Start")', 'Section("Library details")', 'Picker("Start"', 'TextField("Launch arguments"', 'TextField("Custom Launch Arguments"',
                'Text("Home Screen")', 'Section("Executable")')
-desktop_controls = {'Picker("Start"', 'Toggle("Start Windows services first"'}
+desktop_controls = {'Picker("Start with"', 'Picker("Start"', 'Toggle("Start Windows services first"'}
 hidden = []
 for gate in re.finditer(r'\bif\b[^{\n]*(?:entry\.desktop != true|entry\.usesLaunchOptions)[^{\n]*\{', form_body):
     depth, end = 1, gate.end()

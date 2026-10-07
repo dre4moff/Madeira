@@ -14,12 +14,12 @@ fixture=r'''
 #include "auth.h"
 #include "launch.h"
 static uint64_t clock_ms;
-static int online_mode, reports, phases, released, launched, callbacks;
+static int online_mode, reports, phases, released, launched, callbacks, native_mode, local_launched, license_queries;
 static void *user_methods[216],*engine_methods[9];
 static void **user_object=user_methods,**engine_object=engine_methods;
 bool dock_method_is(uintptr_t m,void *o,unsigned slot,uintptr_t rva){(void)m;(void)o;(void)slot;(void)rva;return true;}
-DWORD GetEnvironmentVariableW(const wchar_t *name,wchar_t *value,DWORD cap){(void)name;(void)value;(void)cap;return 0;}
-bool dock_auth_consume_diagnostic(const wchar_t *p,struct dock_auth *a,struct dock_auth_failure *f){(void)p;(void)a;(void)f;assert(0);return false;}
+DWORD GetEnvironmentVariableW(const wchar_t *name,wchar_t *value,DWORD cap){(void)name;if(!native_mode)return 0;assert(cap>8);value[0]=L'a';value[1]=0;return 1;}
+bool dock_auth_consume_diagnostic(const wchar_t *p,struct dock_auth *a,struct dock_auth_failure *f){(void)p;assert(native_mode);memset(f,0,sizeof(*f));a->steam_id=76561197960265729ULL;a->app_id=0;strcpy(a->account,"synthetic");strcpy(a->token,"fixture");return true;}
 void dock_auth_clear(void *b,size_t n){memset(b,0,n);}
 static void *get_user(void *o,int32_t u,int32_t p){(void)o;assert(u==1&&p==2);return &user_object;}
 static bool cached(void *o,const char *n){(void)o;assert(!strcmp(n,"synthetic"));return true;}
@@ -27,10 +27,12 @@ static bool selected(void *o,const char *n,bool remembered){(void)o;(void)n;asse
 static int32_t logon(void *o,uint64_t id){(void)o;assert(id==76561197960265729ULL);return 1;}
 static bool private_online(void *o){(void)o;assert(online_mode);return true;}
 static bool connected(void *o){(void)o;assert(online_mode);return true;}
-static bool subscribed(void *o,uint32_t app){(void)o;(void)app;return true;}
+static bool subscribed(void *o,uint32_t app){(void)o;(void)app;license_queries++;return true;}
 static int32_t can_offline(void *o){(void)o;return 0;}
-static int32_t subscriptions(void *o,uint32_t *apps,int32_t count,bool all){(void)o;assert(count==65536&&all);apps[0]=42;return 1;}
+static int32_t subscriptions(void *o,uint32_t *apps,int32_t count,bool all){(void)o;license_queries++;assert(count==65536&&all);apps[0]=42;return 1;}
 int sh_launch(HMODULE m,void *e,void *u,const struct sh_api *api,const struct sh_observer *obs,int32_t p,int32_t h,uint64_t id,uint32_t app,const struct dock_client_layout *l){(void)m;(void)e;(void)u;(void)api;(void)obs;(void)p;(void)h;(void)id;(void)l;assert(online_mode&&app==42);launched++;return 0;}
+static void submit_token(void *o,const char *token,const char *account){(void)o;assert(native_mode&&!strcmp(token,"fixture")&&!strcmp(account,"synthetic"));}
+int sh_launch_local(const struct sh_api *api,const struct sh_observer *o,int32_t p,int32_t u,uint64_t id){(void)api;(void)o;assert(online_mode&&native_mode&&p==2&&u==1&&id==76561197960265729ULL);local_launched++;return 0;}
 static int32_t create(int32_t *pipe){*pipe=2;return 1;}
 static void release_user(int32_t p,int32_t u){assert(p==2&&u==1);released++;}
 static bool release_pipe(int32_t p){assert(p==2);released++;return true;}
@@ -50,13 +52,23 @@ int main(void){
  setenv("MADEIRA_STEAM_HOST_STEAMID","76561197960265729",1);setenv("MADEIRA_STEAM_HOST_APPID","42",1);setenv("MADEIRA_STEAM_HOST_LAUNCH","1",1);
  engine_methods[8]=(void *)get_user;user_methods[1]=(void *)logon;user_methods[4]=(void *)private_online;user_methods[6]=(void *)connected;
  user_methods[49]=(void *)cached;user_methods[50]=(void *)selected;user_methods[181]=(void *)subscribed;user_methods[182]=(void *)subscriptions;
- user_methods[214]=(void *)can_offline;
+ user_methods[214]=(void *)can_offline;user_methods[56]=(void *)submit_token;
  struct dock_client_layout layout={0};struct sh_api api={create,release_user,release_pipe,get_callback,free_callback,public_online};struct sh_observer obs={now,sleep_ms,event};
  clock_ms=100;assert(sh_session(NULL,&engine_object,&api,&obs,&layout)==34);
  assert(clock_ms==90100&&reports==9&&phases==27&&released==2&&!launched);
  online_mode=1;reports=phases=released=callbacks=0;clock_ms=100;
  assert(sh_session(NULL,&engine_object,&api,&obs,&layout)==0);
  assert(launched==1&&reports==1&&phases==5&&released==2&&clock_ms==5100);
+ setenv("MADEIRA_DOCK_LOCAL","1",1);setenv("MADEIRA_STEAM_HOST_APPID","0",1);
+ assert(sh_session(NULL,&engine_object,&api,&obs,&layout)!=0 && !local_launched);
+ native_mode=1;reports=phases=released=callbacks=license_queries=0;clock_ms=100;
+ assert(sh_session(NULL,&engine_object,&api,&obs,&layout)==0);
+ assert(local_launched==1&&!license_queries&&released==2&&clock_ms==5100&&launched==1);
+ setenv("MADEIRA_DOCK_OFFLINE","1",1);
+ assert(sh_session(NULL,&engine_object,&api,&obs,&layout)==53 && local_launched==1);
+ unsetenv("MADEIRA_DOCK_OFFLINE");online_mode=0;license_queries=callbacks=0;clock_ms=100;
+ assert(sh_session(NULL,&engine_object,&api,&obs,&layout)==34 && !license_queries && local_launched==1);
+ puts("PASS: local mode requires native authentication and online state, does not ask for an app licence, rejects offline mode and never starts when login times out");
  puts("PASS: production session times out unauthenticated at 90 s, emits only nine checkpoints, preserves short-circuit calls, and launches only after online state and subscription-list confirmation");
 }
 '''

@@ -150,7 +150,7 @@ require('if let profile { library.begin(profile, dock: game) }' in dock_start an
 configure = library[library.index('    func configureLaunch() {'):]
 configure = configure[:configure.index('\n    }\n')]
 require(configure.index('if steamAppID != nil {') < configure.index('if !startsSteamGameDirectly {') <
-        configure.index('return') < configure.index('setenv("MADEIRA_EXE"'),
+        configure.index('return', configure.index('if steamAppID != nil {')) < configure.index('setenv("MADEIRA_EXE"'),
         "a Steam game's profile never replaces what Madeira Dock starts (only \"The game\" sets what starts)")
 require(configure.index('unsetenv("MADEIRA_STEAM_APPID"); unsetenv("MADEIRA_STEAM_APPPATH"); unsetenv("MADEIRA_WORKDIR")') <
         configure.index('if steamAppID != nil {') and

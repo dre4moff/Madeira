@@ -141,7 +141,7 @@ static DWORD WaitForSingleObject(HANDLE h, DWORD delay) {
     if (!delay) return waits >= 3 ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
     assert(delay == 50); ++waits;
     if (scenario == 3) interrupted = 1;
-    
+
     return waits >= 3 ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
 }
 static void sleep_ms(uint32_t delay) { (void)WaitForSingleObject((HANDLE)5, delay); }

@@ -1,4 +1,4 @@
-# Complete fork changes — Madeira 0.1.3 / r32
+# Complete fork changes — Madeira 0.1.3 / r33
 
 This unofficial fork is based on Will Faust's official `v0.1.3`
 (`4e9d45a74294cd820120791c4b3f2b79adf4fc70`). Original copyright and licenses
@@ -6,6 +6,19 @@ are retained. Fork changes were prepared with AI assistance and are offered
 for inspection, not as an upstream endorsement or a guaranteed FPS increase.
 The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
+
+## r33 — WinRT input startup dependency
+
+- Include stock Wine `wintypes.dll` for ARM64EC and native ARM64, matching the
+  existing registration of `Windows.Foundation.Metadata.ApiInformation`.
+- Address the missing module immediately before Supermarket Together's Rewired
+  input plugin throws an unhandled C++ exception in the supplied r32 log.
+- Make the builtin build helper accept ARM64EC, ARM64 and i386; add `wintypes`
+  to its default module list. Preserve the existing 32-bit module and all r32 engines.
+- Verify activation-class registration, DLL exports, PE architecture and imported
+  DLL availability in both the source farms and final IPA, including negative fixtures.
+- Optimized Release build 18; on-device game startup remains to be retested.
+  See [r33 diagnosis and validation](R33_WINRT_INPUT_STARTUP.md).
 
 ## r32 — Every original upstream update, with fork features preserved
 

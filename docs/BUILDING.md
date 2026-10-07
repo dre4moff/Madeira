@@ -1,4 +1,4 @@
-# Current fork build (0.1.3 r29)
+# Current fork build (0.1.3 r33)
 
 The fork is synchronized with official v0.1.3 and published submodule pins.
 Use [FORK_RELEASE.md](FORK_RELEASE.md) for the optimized Release build and
@@ -63,7 +63,7 @@ git-ignored and consumed by the app project.
 3. Wine (submodule, branch madeira-lgpl):
    - unix side: `build/ntdll-unix/build.sh`, `build/wineserver/build.sh`,
      `build/win32u-unix/build.sh` -> `app/Madeira/lib{ntdll_unix,wineserver,win32u_unix}.a`. Verified on the development machine.
-   - PE side: `build/wine-pe/build-ntdll.sh` (configures `wine/build-arm64ec` with `--enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer` on first run, builds `dlls/ntdll`, strips, pads to SizeOfImage + 0x50000, copies to the app). Other PE modules: `build/wine-pe/build-modules.sh <name>...` (same tree; it builds each module's DLL target `dlls/<name>/arm64ec-windows/<name>.dll`, strips it with `--strip-debug` like every shipped builtin and installs it into `app/Madeira/arm64ec-windows/`, or into `$DEST`). Building the DLL target rather than `make -C dlls/<name>` is also what winegstreamer needs (enabled by `--enable-winegstreamer` although GStreamer is absent, since its unix side is `build/ntdll-unix/winegstreamer_unixlib_ios.c`). Without arguments the script rebuilds the stock builtins added for games: `cryptsp`, `d3dx11_43`, `msvcp110`, `msvcr110` and `xaudio2_7` (committed in `app/Madeira/arm64ec-windows/` like every other builtin). It needs bison 3 for `tools/wrc` (macOS ships 2.3; Homebrew's is used when installed). The strip/pad step was verified this session; the configure step is UNVERIFIED from clean; build-modules.sh reproduced the five default DLLs at their shipped sizes on the development machine (2026-10-03).
+   - PE side: `build/wine-pe/build-ntdll.sh` (configures `wine/build-arm64ec` with `--enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer` on first run, builds `dlls/ntdll`, strips, pads to SizeOfImage + 0x50000, copies to the app). Other PE modules: `build/wine-pe/build-modules.sh <name>...` (same tree; it builds each module's DLL target `dlls/<name>/arm64ec-windows/<name>.dll`, strips it with `--strip-debug` like every shipped builtin and installs it into `app/Madeira/arm64ec-windows/`, or into `$DEST`). Building the DLL target rather than `make -C dlls/<name>` is also what winegstreamer needs (enabled by `--enable-winegstreamer` although GStreamer is absent, since its unix side is `build/ntdll-unix/winegstreamer_unixlib_ios.c`). Without arguments the script rebuilds the stock builtins added for games: `cryptsp`, `d3dx11_43`, `msvcp110`, `msvcr110` and `xaudio2_7` and `wintypes` (committed in `app/Madeira/arm64ec-windows/` like every other builtin). It needs bison 3 for `tools/wrc` (macOS ships 2.3; Homebrew's is used when installed). The strip/pad step was verified this session; the configure step is UNVERIFIED from clean; build-modules.sh reproduced the five default DLLs at their shipped sizes on the development machine (2026-10-03).
    - `app/Madeira/arm64ec-windows/` is the DLL farm: every file in it is linked into the prefix (`system32` for x64 sessions, and `sysx64`), so a Wine module is only available if it was built and copied there. The native D3D12 path needs two stock modules in addition to the existing ones: `dcomp.dll` (`make -C dlls/dcomp`; a 64-bit Godot 4 engine loads it before it creates its D3D12 device, and gives up on D3D12 without it) and `ktmw32.dll` (`make -C dlls/ktmw32`; an optional import the same engine probes).
 4. DXMT (submodule, branch ios-port):
    - unix side: `build/dxmt-ios/build.sh` (needs `toolchains/llvm-ios-build`) -> `app/Madeira/libdxmt_combined.a` (ignored; the app links it). Verified this session.
@@ -122,3 +122,26 @@ six XInput variants, and rebuilt/staged all seven i386 DXMT frontend files.
 The original WoW64 service executables must also remain in aarch64-windows.
 A final PE import scan covers all three farms; r32 supplies bluetoothapis.dll
 for the existing bthprops.cpl dependency.
+
+## Fork r33 partial rebuild
+
+The r33 WinRT fix rebuilds only `wintypes.dll`; the published r32 native archives
+and existing Windows engines are reused byte-for-byte. Run
+`bash build/wine-pe/build-modules.sh wintypes` and
+`ARCH=aarch64 bash build/wine-pe/build-modules.sh wintypes`, then the optimized
+Xcode command in `FORK_RELEASE.md` (build 18). Seed the ignored i386 runtime and
+native archives from verified prior build inputs, fetch Wine Mono and run
+`bash build/stage-licenses.sh` before Xcode.
+
+The application bridge also includes FEX's generated `ConfigValues.inl` and
+`ConfigOptions.inl` under `FEX/build-ios/include/FEXCore/Config`. Preserve these
+headers with the native archive inputs or regenerate them using the pinned
+`FEX/FEXCore/Scripts/config_generator.py` and configured `Config.json`. Match
+`--feature=GuestWindow` to the archive's build configuration; this release's
+native archive has it disabled. Generating headers does not modify FEX sources
+or rebuild its original Windows engines.
+
+Package with `tools/package-r33-release.py` against the SHA-256-verified public
+r32 IPA. This also checks the final WinRT and DLSS/MetalFX payloads. See
+[R33_WINRT_INPUT_STARTUP.md](R33_WINRT_INPUT_STARTUP.md) for the scope and device
+acceptance limits.

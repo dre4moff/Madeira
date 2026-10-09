@@ -104,6 +104,20 @@ compile_unixlib() {
     fi
 }
 
+# Replace only the certificate-store shim for a root enumeration correction.
+if [ "${MADEIRA_ONLY:-}" = "crypt32_unixlib" ]; then
+    test -f "$APP_LIB" && test -f "$WINE_BUILD/include/config.h"
+    compile_unixlib "$CRYPTO_DIR/crypt32_unixlib_ios.c" "crypt32_unixlib" "crypt32" \
+        -I"$WINE_SRC/dlls/crypt32" -I"$GNUTLS_PREFIX/include" \
+        -include "$CRYPTO_DIR/ios_gnutls_shim.h"
+    [ "$FAILED" -eq 0 ]
+    cp "$APP_LIB" "$OBJ_DIR/libntdll_unix.a"
+    xcrun ar r "$OBJ_DIR/libntdll_unix.a" "$OBJ_DIR/crypt32_unixlib.o"
+    xcrun ranlib "$OBJ_DIR/libntdll_unix.a"
+    cp "$OBJ_DIR/libntdll_unix.a" "$APP_LIB"
+    exit 0
+fi
+
 echo "=== Building ntdll unix (iOS) ==="
 
 # iOS-Madeira 2026-05-13: silent audio driver — provides a null

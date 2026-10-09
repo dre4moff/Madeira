@@ -1,3 +1,12 @@
+# r38 — Shared trusted CA roots
+
+- Preserve all bundled CA roots across native and WoW64 Windows processes.
+- Correct the later import that deleted trusted certificates on the observed iPhone.
+- Reproduce the r37 failure and verify 64 concurrent native/WoW64 enumerators
+  with the actual 121 CA certificates under ASan/UBSan.
+- Rebuild only the native crypt32 shim in optimized unsigned build 23.
+  Fresh phone TLS and lobby acceptance remain open; see [evidence](R38_SHARED_CA_ROOTS.md).
+
 # r37 — Darwin UDP control data
 
 - Translate Darwin IPv4 received TOS metadata to the Windows IP_TOS message.

@@ -1,4 +1,4 @@
-# Current fork build (0.1.3 r37)
+# Current fork build (0.1.3 r38)
 
 The fork is synchronized with official v0.1.3 and published submodule pins.
 Use [FORK_RELEASE.md](FORK_RELEASE.md) for the optimized Release build and
@@ -6,6 +6,9 @@ unsigned packaging, [R29_TEXTURE_STREAMING.md](R29_TEXTURE_STREAMING.md) for the
 current changes and [R28_UPSTREAM_013.md](R28_UPSTREAM_013.md) for upstream integration.
 Build `build/rppairing-ios/build.sh` before Xcode; the app links that library
 and embeds its separate StikJIT helper. Preserve app extensions during sideloading.
+For the r38 certificate correction, use `MADEIRA_ONLY=crypt32_unixlib` with
+`build/ntdll-unix/build.sh` and the configured native Wine headers described
+below. It replaces only that archive member. See [validation](R38_SHARED_CA_ROOTS.md).
 The historical record below predates this fork; its unpushed-pin and Debug-only
 remarks do not describe the current release. Clean-machine relinking and device
 acceptance remain separate from the local build verified here.

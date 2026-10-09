@@ -1,3 +1,11 @@
+# r36 — Failed-import memory growth
+
+Repeated missing-import retries reuse one privately retained PE image instead of
+accumulating mappings and JIT copies. Resolved imports, TLS and activation contexts
+are retained safely; a later supplied dependency can complete the load. Wine QoS
+modules are included for ARM64EC and ARM64. See [scope and checks](R36_FAILED_IMPORT_MEMORY.md).
+Device menu memory stability and online operation remain unverified.
+
 # Complete fork changes — Madeira 0.1.3 / r34
 
 This unofficial fork is based on Will Faust's official `v0.1.3`

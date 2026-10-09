@@ -5,7 +5,7 @@
 [submodule "wine"]
 	path = wine
 	url = https://github.com/dre4moff/wine.git
-	branch = codex/upstream-sync-r32
+	branch = codex/failed-import-memory-r36
 [submodule "dxmt"]
 	path = dxmt
 	url = https://github.com/dre4moff/dxmt.git

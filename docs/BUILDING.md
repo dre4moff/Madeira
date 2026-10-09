@@ -1,4 +1,4 @@
-# Current fork build (0.1.3 r33)
+# Current fork build (0.1.3 r36)
 
 The fork is synchronized with official v0.1.3 and published submodule pins.
 Use [FORK_RELEASE.md](FORK_RELEASE.md) for the optimized Release build and
@@ -145,3 +145,12 @@ Package with `tools/package-r33-release.py` against the SHA-256-verified public
 r32 IPA. This also checks the final WinRT and DLSS/MetalFX payloads. See
 [R33_WINRT_INPUT_STARTUP.md](R33_WINRT_INPUT_STARTUP.md) for the scope and device
 acceptance limits.
+
+## Fork r36 loader rebuild
+
+Use `ARCH=arm64ec`, `ARCH=aarch64` and `ARCH=i386` with
+`build/wine-pe/build-ntdll.sh` for the changed loader. Build stock `qwave` with
+`build/wine-pe/build-modules.sh` for ARM64EC and ARM64. Preserve the existing
+i386 QoS module and all unaffected native/graphics engines. Run the optimized
+Release build (21), then `tools/package-r36-release.py` against the verified r35
+IPA. See [the retry design and acceptance limits](R36_FAILED_IMPORT_MEMORY.md).

@@ -20,6 +20,7 @@
 #                                  delay-loads SystemFunction032 from it
 #   xaudio2_7                      the prefix registers CLSID_XAudio2 (2.7) at
 #                                  system32\xaudio2_7.dll
+#   qwave                          networking plugins import Windows QoS APIs
 #   wintypes                       Rewired requests the registered WinRT
 #                                  Windows.Foundation.Metadata.ApiInformation
 # Pass the tracked modules a change touches (kernelbase, shell32, xinput1_1 ...
@@ -50,7 +51,7 @@ STRIP="$TC/$TRIPLE-strip"
 case "${1:-}" in
     -h|--help) sed -n '2,/^set -eu/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
 esac
-[ $# -gt 0 ] || set -- cryptsp d3dx11_43 msvcp110 msvcr110 xaudio2_7 wintypes
+[ $# -gt 0 ] || set -- cryptsp d3dx11_43 msvcp110 msvcr110 xaudio2_7 wintypes qwave
 [ -x "$STRIP" ] || { echo "llvm-mingw not found at $TC (docs/BUILDING.md)" >&2; exit 1; }
 
 targets=()

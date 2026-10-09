@@ -1,4 +1,4 @@
-# Current fork build (0.1.3 r36)
+# Current fork build (0.1.3 r37)
 
 The fork is synchronized with official v0.1.3 and published submodule pins.
 Use [FORK_RELEASE.md](FORK_RELEASE.md) for the optimized Release build and
@@ -154,3 +154,13 @@ Use `ARCH=arm64ec`, `ARCH=aarch64` and `ARCH=i386` with
 i386 QoS module and all unaffected native/graphics engines. Run the optimized
 Release build (21), then `tools/package-r36-release.py` against the verified r35
 IPA. See [the retry design and acceptance limits](R36_FAILED_IMPORT_MEMORY.md).
+
+## Fork r37 native UDP rebuild
+
+Configure a Wine build tree for its generated headers, then use
+`MADEIRA_ONLY=socket MADEIRA_WINE_CONFIG_DIR=/path/to/wine/build-arm64ec bash build/ntdll-unix/build.sh`.
+This replaces only `socket.o` in the current native archive. Commit the Dock
+source pin before `bash build/madeira-dock/build.sh --check`, so its corresponding
+source notice is exact. Stage licenses and Wine Mono source as above. Run the
+optimized Release build (22), then `tools/package-r37-release.py` against the
+verified r36 IPA. See [the UDP contract and device acceptance limits](R37_UDP_CONTROL.md).

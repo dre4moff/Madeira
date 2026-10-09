@@ -1,5 +1,16 @@
 # Madeira Dock
 
+## Local-program connection diagnostics (r37)
+
+The local-program host keeps pumping Steam callbacks while the complete Windows
+process tree runs. It checks the public client's logged-on state every 30 seconds;
+`launch-client-logged-on` reports initial state and changes, and connection
+callbacks 102/103 report numeric results. Each category is bounded to 16 reports,
+with no identifiers or callback payloads. Disconnection reporting does not kill
+the local game. Steam sign-in does not itself prove a game's multiplayer access.
+The Wine UDP control-data correction is documented in
+[R37_UDP_CONTROL.md](R37_UDP_CONTROL.md).
+
 ## Full original Dock sync and per-game arguments (r32)
 
 The r32 pin merges original Dock `72558e4`: original launch-entry keys,

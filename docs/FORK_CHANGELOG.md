@@ -1,10 +1,18 @@
+# r37 — Darwin UDP control data
+
+- Translate Darwin IPv4 received TOS metadata to the Windows IP_TOS message.
+- Correct payload lengths and compact buffer sizing in the 32-bit receive path.
+- Add bounded numeric local Steam logged-on and connection reports.
+- Verify 512 real host UDP datagrams and the optimized unsigned build 22.
+  Real phone room creation/joining remains open; see [scope and checks](R37_UDP_CONTROL.md).
+
 # r36 — Failed-import memory growth
 
 Repeated missing-import retries reuse one privately retained PE image instead of
 accumulating mappings and JIT copies. Resolved imports, TLS and activation contexts
 are retained safely; a later supplied dependency can complete the load. Wine QoS
 modules are included for ARM64EC and ARM64. See [scope and checks](R36_FAILED_IMPORT_MEMORY.md).
-Device menu memory stability and online operation remain unverified.
+The user reports stable menu memory on r36; online operation remains unverified.
 
 # Complete fork changes — Madeira 0.1.3 / r34
 

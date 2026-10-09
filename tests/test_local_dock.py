@@ -69,6 +69,7 @@ static int widecmp(const wchar_t *a, const wchar_t *b, size_t count) {
 #define _wcsicmp(a,b) widecmp(a,b,(size_t)-1)
 #define _wcsnicmp widecmp
 static int scenario, creates, closes, terminated, waits, pumps, freed, started;
+static int logon_calls, logon_events, connection_events;
 static DWORD registry[3];
 static int indexof(const wchar_t *name) { return !wcscmp(name,L"pid") ? 0 : !wcscmp(name,L"ActiveUser") ? 1 : 2; }
 static LSTATUS RegQueryValueExW(HKEY k, const wchar_t *n, void *r, DWORD *type, BYTE *v, DWORD *size) {
@@ -107,7 +108,7 @@ static BOOL AssignProcessToJobObject(HANDLE job, HANDLE process) { assert(job ==
 static DWORD ResumeThread(HANDLE thread) { assert(thread == (HANDLE)6); return 1; }
 static BOOL QueryInformationJobObject(HANDLE job, int kind, void *data, DWORD size, void *returned) {
     assert(job == (HANDLE)7 && kind == JobObjectBasicAccountingInformation && size == sizeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION) && !returned);
-    ((JOBOBJECT_BASIC_ACCOUNTING_INFORMATION *)data)->ActiveProcesses = waits < (scenario == 8 ? 5 : 3);
+    ((JOBOBJECT_BASIC_ACCOUNTING_INFORMATION *)data)->ActiveProcesses = waits < (scenario == 8 || scenario == 11 ? 5 : 3);
     if (scenario == 6 && waits == 3) registry[0] = 888;
     return scenario != 10;
 }
@@ -125,11 +126,23 @@ static BOOL GetExitCodeProcess(HANDLE h, DWORD *code) { assert(h == (HANDLE)5); 
 static DWORD WaitForSingleObject(HANDLE h, DWORD delay);
 static bool get_callback(int32_t pipe, struct sh_callback *cb) {
     assert(pipe == 1 && creates == 1 && started && registry[0] == 99); ++pumps;
-    if (!(pumps % 2)) return false;
+    if (scenario != 12 && !(pumps % 2)) return false;
+    if (scenario == 12) {
+        static int32_t error = 7;
+        *cb = (struct sh_callback){.id = pumps % 2 ? 102 : 103, .size = 4, .data = &error}; return true;
+    }
     *cb = (struct sh_callback){.id = scenario == 2 ? -1 : 100, .size = 0}; return true;
 }
 static void free_callback(int32_t pipe) { assert(pipe == 1); ++freed; }
-static void event(const char *name, int32_t value) { if (!strcmp(name,"launch-local-started")) { assert(value == 1); ++started; } }
+static uint64_t now_ms(void) { return scenario == 11 ? (uint64_t)waits * 15000 : (uint64_t)waits * 50; }
+static bool logged_on(int32_t user, int32_t pipe) { assert(user == 1 && pipe == 1); ++logon_calls; return scenario != 11 || logon_calls != 2; }
+static void event(const char *name, int32_t value) {
+    if (!strcmp(name,"launch-local-started")) { assert(value == 1); ++started; }
+    if (!strcmp(name,"launch-client-logged-on")) {
+        assert(value == (scenario == 11 && logon_events == 1 ? 0 : 1)); ++logon_events;
+    }
+    if (!strcmp(name,"launch-client-connection-result")) { assert(value == 7); ++connection_events; }
+}
 '''
 production = ('struct saved_value { HKEY key; const wchar_t *name; DWORD previous, written; bool existed, changed; };\n'
               + function('static bool publish(') + '\n' + function('static bool restore(')
@@ -146,12 +159,13 @@ static DWORD WaitForSingleObject(HANDLE h, DWORD delay) {
 }
 static void sleep_ms(uint32_t delay) { (void)WaitForSingleObject((HANDLE)5, delay); }
 int main(void) {
-    struct sh_api api = {.get_callback=get_callback,.free_callback=free_callback};
-    struct sh_observer observer = {.event=event,.sleep_ms=sleep_ms};
-    int expected[] = {0,54,SH_CALLBACK_INVALID,44,53,42,47,53,0,54,54};
-    for (scenario = 0; scenario < 11; ++scenario) {
+    struct sh_api api = {.get_callback=get_callback,.free_callback=free_callback,.logged_on=logged_on};
+    struct sh_observer observer = {.event=event,.sleep_ms=sleep_ms,.now_ms=now_ms};
+    int expected[] = {0,54,SH_CALLBACK_INVALID,44,53,42,47,53,0,54,54,0,0};
+    for (scenario = 0; scenario < 13; ++scenario) {
         registry[0] = 9; registry[1] = 8; registry[2] = 7;
         creates = closes = terminated = waits = pumps = freed = started = 0; interrupted = 0;
+        logon_calls = logon_events = connection_events = 0;
         int result = sh_launch_local(&api,&observer,1,1,123);
         assert(result == expected[scenario]);
         if (scenario != 6) assert(registry[0] == 9 && registry[1] == 8 && registry[2] == 7);
@@ -162,6 +176,9 @@ int main(void) {
         if (scenario == 8) assert(waits == 5 && closes == 3 && !terminated && pumps == 12);
         if (scenario == 9) assert(creates == 1 && !started && terminated == 1 && closes == 3);
         if (scenario == 10) assert(started == 1 && terminated == 1 && closes == 3);
+        if (!scenario) assert(logon_calls == 1 && logon_events == 1);
+        if (scenario == 11) assert(logon_calls == 3 && logon_events == 3 && waits == 5 && !terminated);
+        if (scenario == 12) assert(connection_events == 16 && pumps == 256 && freed == 256 && !terminated);
     }
     puts("PASS: local process lifetime, callback pumping, Unicode/quoted arguments, creation failure, invalid callbacks, interruption, invalid paths, partial registry rollback and competing Steam registration, launcher descendants and job failure cleanup");
 }

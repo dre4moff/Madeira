@@ -5,7 +5,7 @@
 [submodule "wine"]
 	path = wine
 	url = https://github.com/dre4moff/wine.git
-	branch = codex/failed-import-memory-r36
+	branch = codex/udp-control-r37
 [submodule "dxmt"]
 	path = dxmt
 	url = https://github.com/dre4moff/dxmt.git
@@ -13,4 +13,4 @@
 [submodule "madeira-dock"]
 	path = madeira-dock
 	url = https://github.com/dre4moff/madeira-dock.git
-	branch = codex/local-dock-r35
+	branch = codex/udp-control-r37

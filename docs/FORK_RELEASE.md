@@ -1,10 +1,13 @@
 # Fork release and personal runtime setup
 
-Release: `v0.1.3-fork-r36`, based on official Madeira `v0.1.3` plus every upstream `main` change through `48f9764`. This is an
+Release: `v0.1.3-fork-r37`, based on official Madeira `v0.1.3` plus every upstream `main` change through `48f9764`. This is an
 unofficial, experimental prerelease. The app is optimized Release (`-O2` native,
-`-O` whole-module Swift), build 21, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
+`-O` whole-module Swift), build 22, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
 Manual cache cleanup, the negative cache-disabled trial and remaining movement stutters are explained in [the developer report](R31_PERFORMANCE_REPORT.md).
 The public IPA is unsigned; it needs personal signing/sideloading and JIT.
+
+r37 restores Darwin UDP TOS control data and adds bounded local Steam connection
+reports. See [the network correction and validation](R37_UDP_CONTROL.md).
 
 r36 bounds repeated failed-import loads and includes Wine’s QoS dependency.
 See [the memory fix and validation](R36_FAILED_IMPORT_MEMORY.md).
@@ -17,7 +20,7 @@ not hard RAM limits. See [behavior and validation](R34_TEXTURE_MEMORY_OPTIONS.md
 
 ## Install
 
-1. Download `Madeira-0.1.3-Fork-r36-Release-unsigned.ipa` from
+1. Download `Madeira-0.1.3-Fork-r37-Release-unsigned.ipa` from
    [this fork's releases](https://github.com/dre4moff/Madeira/releases).
 2. For games needing Microsoft native VC++ runtime, first prepare your personal
    IPA as below. Microsoft binaries are deliberately absent from public assets.
@@ -49,9 +52,9 @@ Run on macOS with Python 3:
 
 ```sh
 python3 tools/prepare-vcruntime-ipa.py \
-  --ipa /path/to/Madeira-0.1.3-Fork-r36-Release-unsigned.ipa \
+  --ipa /path/to/Madeira-0.1.3-Fork-r37-Release-unsigned.ipa \
   --runtime-dir /path/to/your/unmodified-x64-runtime \
-  --output /path/to/Madeira-r36-personal-unsigned.ipa
+  --output /path/to/Madeira-r37-personal-unsigned.ipa
 ```
 
 The helper checks x64 PE headers and intact certificate ranges, preserves DLL
@@ -64,7 +67,7 @@ about app extensions; built-in JIT requires it. See [JIT setup](JIT.md). These p
 ## Source and rebuilding
 
 ```sh
-git clone --recurse-submodules --branch v0.1.3-fork-r36 \
+git clone --recurse-submodules --branch v0.1.3-fork-r37 \
   https://github.com/dre4moff/Madeira.git
 ```
 

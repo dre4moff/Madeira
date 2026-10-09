@@ -4,12 +4,15 @@ Unofficial fork based on [Will Faust's Madeira 0.1.3](https://github.com/willfau
 The original app and engines are credited below. This fork adds per-game VC++
 runtime and DX11 controls, controller integration fixes, experimental DLSS-to-
 MetalFX bridges for DX11/DX12, cache maintenance, real microphone capture, worker context and fullscreen fixes,
-and texture streaming overhead reductions. The current release is **0.1.3 Fork r36**;
+and texture streaming overhead reductions. The current release is **0.1.3 Fork r37**;
 all changes from upstream `main` through `48f9764` are integrated, including
 Wine Mono, save backups and Home Screen shortcuts, grouped libraries, offline
 Steam, original launch-entry keys, spatial MetalFX, frame generation, NVIDIA
 reporting, AVX options, HID controller output and the latest D3D12/runtime work.
 The existing fork controls, microphone, DLSS bridges and cache fixes remain.
+
+The r37 patch restores Darwin UDP TOS control data and adds bounded local-client
+connection reports. See [the network correction and acceptance limits](docs/R37_UDP_CONTROL.md).
 
 The r36 patch prevents repeated missing-import loads from accumulating images and
 includes Wine’s QoS dependency. See [the memory fix](docs/R36_FAILED_IMPORT_MEMORY.md).

@@ -51,6 +51,8 @@ select DLSS and reach feature evaluation; it is not a universal upscaling toggle
 Obtain Microsoft's official x64 Visual C++ redistributable and extract its
 unmodified files and accompanying terms; [upstream instructions](../tools/fetch-vcruntime.md).
 The local folder needs all twelve DLLs listed there and `MICROSOFT-LICENSE.rtf`.
+When supplied, `mfc140.dll` and `mfc140u.dll` from the same official x64
+redistributable are included too; older twelve-DLL personal folders still work.
 Their Microsoft license is separate from this project. They are not downloaded
 or redistributed by the helper. Do not strip their certificate payloads.
 

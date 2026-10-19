@@ -21,6 +21,7 @@ DLLS = (
     "vccorlib140.dll", "vcomp140.dll", "vcruntime140.dll", "vcruntime140_1.dll",
     "vcruntime140_threads.dll",
 )
+OPTIONAL_DLLS = ("mfc140.dll", "mfc140u.dll")
 
 
 def runtime_bytes(path):
@@ -44,6 +45,8 @@ def prepare(ipa, runtime_dir, output):
     if output.exists() or output.resolve() == ipa.resolve():
         raise ValueError("Output must be a new file; the input is never overwritten")
     payloads = {name: runtime_bytes(runtime_dir / name) for name in DLLS}
+    payloads.update({name: runtime_bytes(runtime_dir / name) for name in OPTIONAL_DLLS
+                     if (runtime_dir / name).is_file()})
     terms = (runtime_dir / "MICROSOFT-LICENSE.rtf").read_bytes()
     if not terms:
         raise ValueError("Supply the accompanying MICROSOFT-LICENSE.rtf terms")

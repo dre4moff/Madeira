@@ -143,6 +143,8 @@ def main():
     assert hashlib.sha256(after['wine-mono/lib/mono/4.5/mscorlib.dll']).hexdigest() == 'cfc4fb50c0e4f93d6e2c5fd827e2d7b3f215d3b183df024db68d6784c5388bc6'
     assert after['wine-mono/COPYING'] == (ROOT / 'build/wine-mono/COPYING').read_bytes()
     assert after['arm64ec-windows/d3d12.dll'] == after['arm64ec-windows/madeira_d3d12.dll']
+    assert after['i386-windows/d3d9.dll'] == after['i386-windows/d3d9shim.dll']
+    assert after['i386-windows/d3d9-emulated.dll'] != after['i386-windows/d3d9.dll']
     assert git('-C', 'madeira-dock', 'rev-parse', 'HEAD').encode() in after['arm64ec-windows/dock-notices.txt']
     for name in ('test_qwave_payload.py', 'test_wintypes_payload.py', 'test_dlss_payload.py'):
         subprocess.run([sys.executable, str(ROOT / 'tests' / name), str(ipa)], check=True)

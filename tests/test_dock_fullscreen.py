@@ -18,6 +18,13 @@ stub = r'''
 #import <Metal/Metal.h>
 #include <assert.h>
 #include <math.h>
+#include <stdatomic.h>
+CALayer *madeira_display_layer(void){return nil;}
+static int winios_desktop_session(void);
+static int winios_swapchain_hwnd(void *h){(void)h;return 0;}
+static int winios_swapchain_take(int s,int k,unsigned *q){(void)s;(void)k;(void)q;return 0;}
+static void winios_swapchain_hwnds_reset(void){}
+enum {WINIOS_SWAP_LAYER=5};
 #define UIColor NSColor
 #define WINIOS_PX_TO_PT_Y (g_px_to_pt_y>0?g_px_to_pt_y:g_px_to_pt)
 static NSMutableDictionary<NSNumber *,CALayer *> *g_layers;

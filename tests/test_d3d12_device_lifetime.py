@@ -38,6 +38,7 @@ struct mad_device {
  const char *name;
  void *fence_thread,*fence_wake;
  obj_handle_t gpu_event,dsso,mtl_queue,mtl_device,ds_scratch;
+ obj_handle_t k_ring,k_tind_pso,k_probe_pso,k_lib;
  unsigned ntheaps,nfillpat,nring_pool,nring_retired,nmhret;
  struct theap *theaps;struct pattern *fillpat;
  struct ring *ring_pool,*ring_retired;

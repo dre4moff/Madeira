@@ -6,7 +6,7 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 source = (root / 'build/wineserver/fd_ios.c').read_text()
 a = source.index('semaphore_t ios_srv_wake_sem = 0;')
-b = source.index('\n/* __WINESRC__', a)
+b = source.index('\n/* Server config switches', a)
 production = source[a:b]
 fixture = r'''
 #include <assert.h>

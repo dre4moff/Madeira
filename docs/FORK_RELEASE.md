@@ -1,10 +1,13 @@
 # Fork release and personal runtime setup
 
-Release: `v0.1.3-fork-r38`, based on official Madeira `v0.1.3` plus every upstream `main` change through `48f9764`. This is an
+Release: `v0.1.3-fork-r39`, based on official Madeira `v0.1.3` plus every upstream `main` change through `279fd0f`. This is an
 unofficial, experimental prerelease. The app is optimized Release (`-O2` native,
-`-O` whole-module Swift), build 23, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
+`-O` whole-module Swift), build 24, with external symbols outside the IPA. Profiling phase controls and Debug support dylibs are disabled.
 Manual cache cleanup, the negative cache-disabled trial and remaining movement stutters are explained in [the developer report](R31_PERFORMANCE_REPORT.md).
 The public IPA is unsigned; it needs personal signing/sideloading and JIT.
+
+r39 merges every original upstream update and preserves the fork features.
+See [r39 integration, checks and device limits](R39_UPSTREAM_SYNC.md).
 
 r38 preserves trusted CA roots across Windows processes on iOS.
 See [the TLS correction and device evidence](R38_SHARED_CA_ROOTS.md).
@@ -23,7 +26,7 @@ not hard RAM limits. See [behavior and validation](R34_TEXTURE_MEMORY_OPTIONS.md
 
 ## Install
 
-1. Download `Madeira-0.1.3-Fork-r38-Release-unsigned.ipa` from
+1. Download `Madeira-0.1.3-Fork-r39-Release-unsigned.ipa` from
    [this fork's releases](https://github.com/dre4moff/Madeira/releases).
 2. For games needing Microsoft native VC++ runtime, first prepare your personal
    IPA as below. Microsoft binaries are deliberately absent from public assets.
@@ -55,9 +58,9 @@ Run on macOS with Python 3:
 
 ```sh
 python3 tools/prepare-vcruntime-ipa.py \
-  --ipa /path/to/Madeira-0.1.3-Fork-r38-Release-unsigned.ipa \
+  --ipa /path/to/Madeira-0.1.3-Fork-r39-Release-unsigned.ipa \
   --runtime-dir /path/to/your/unmodified-x64-runtime \
-  --output /path/to/Madeira-r38-personal-unsigned.ipa
+  --output /path/to/Madeira-r39-personal-unsigned.ipa
 ```
 
 The helper checks x64 PE headers and intact certificate ranges, preserves DLL
@@ -70,7 +73,7 @@ about app extensions; built-in JIT requires it. See [JIT setup](JIT.md). These p
 ## Source and rebuilding
 
 ```sh
-git clone --recurse-submodules --branch v0.1.3-fork-r38 \
+git clone --recurse-submodules --branch v0.1.3-fork-r39 \
   https://github.com/dre4moff/Madeira.git
 ```
 
@@ -101,7 +104,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -destination 'generic/platform=iOS' -derivedDataPath .build/release \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO ENABLE_DEBUG_DYLIB=NO \
   GCC_OPTIMIZATION_LEVEL=2 SWIFT_OPTIMIZATION_LEVEL=-O \
-  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym CURRENT_PROJECT_VERSION=23 ENABLE_TESTABILITY=NO build
+  DEBUG_INFORMATION_FORMAT=dwarf-with-dsym CURRENT_PROJECT_VERSION=24 ENABLE_TESTABILITY=NO build
 ```
 
 The historical r17/r18/r19 packagers consume local prior artifacts/checkpoints;

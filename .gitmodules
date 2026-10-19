@@ -5,11 +5,11 @@
 [submodule "wine"]
 	path = wine
 	url = https://github.com/dre4moff/wine.git
-	branch = codex/udp-control-r37
+	branch = codex/upstream-sync-r39
 [submodule "dxmt"]
 	path = dxmt
 	url = https://github.com/dre4moff/dxmt.git
-	branch = codex/upstream-sync-r32
+	branch = codex/upstream-sync-r39
 [submodule "madeira-dock"]
 	path = madeira-dock
 	url = https://github.com/dre4moff/madeira-dock.git

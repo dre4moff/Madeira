@@ -30,6 +30,7 @@ static int nb_users,allocated_users,active_users;
 static void init_epoll(void){}
 static void remove_epoll_user(struct fd *fd,int user){(void)fd;(void)user;}
 static int madeira_runtime_profiling_cached(void){return 0;}
+static int ios_srv_log_sample(unsigned long *count){(void)count;return 1;}
 #define ws_log(...) ((void)0)
 ''' + function('static int add_poll_user(') + '\n' + function('static void remove_poll_user(') + r'''
 int main(void){

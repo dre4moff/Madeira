@@ -4,6 +4,7 @@ import tempfile
 import subprocess
 root=Path(__file__).resolve().parents[1]
 s=(root/'build/wineserver/request_ios.c').read_text();a=s.index('int send_client_fd(');b=s.index('\n}',a)+2
+sample = 'static volatile int g_madeira_srv_log_all;\n' + 'int ios_srv_log_sample( unsigned long *count )\n{\n    unsigned long n = ++*count;\n    return n <= 64 || !(n % 1000) || __atomic_load_n( &g_madeira_srv_log_all, __ATOMIC_RELAXED ) == 1;\n}' + '\n'
 source=r'''
 #include <assert.h>
 #include <stdint.h>
@@ -16,9 +17,9 @@ source=r'''
 #include "runtime_profiling.h"
 typedef uint32_t obj_handle_t;
 struct process{unsigned id;int msg_fd;};struct thread{unsigned id;};
-static struct thread *current;static int debug_level,logged,killed,reply=4,last_kill=-1;
+static struct thread *current;static int debug_level,fixture_logged,killed,reply=4,last_kill=-1;
 static int get_unix_fd(int fd){return fd;}
-#define ws_log(...) (++logged, errno=EINTR)
+#define ws_log(...) (++fixture_logged, errno=EINTR)
 static void kill_process(struct process *p,int code){(void)p;last_kill=code;++killed;}
 static int mock_sendmsg(int fd,const struct msghdr *msg,int flags){
  assert(fd==9 && !flags && msg->msg_iovlen==1 && msg->msg_iov->iov_len==4);
@@ -28,14 +29,14 @@ static int mock_sendmsg(int fd,const struct msghdr *msg,int flags){
  errno=EPIPE;return reply;
 }
 #define sendmsg mock_sendmsg
-'''+s[a:b]+r'''
+'''+sample+s[a:b]+r'''
 int main(int argc,char **argv){
  assert(argc==2);setenv("MADEIRA_QUIET","1",1);setenv("MADEIRA_RUNTIME_PROFILING",argv[1],1);
- struct process p={1,9};int on=atoi(argv[1]);
+ struct process p={1,9};int on=atoi(argv[1]);g_madeira_srv_log_all=on;
  for(int i=0;i<10000;i++)assert(send_client_fd(&p,7,123)==0);
- assert(!killed && logged==on*20000);
- logged=0;reply=-1;assert(send_client_fd(&p,7,123)==-1 && killed==1 && last_kill==0 && logged>=2);
- logged=0;reply=2;assert(send_client_fd(&p,7,123)==-1 && killed==2 && last_kill==1 && logged>=2);
+ assert(!killed && fixture_logged==on*20000);
+ fixture_logged=0;reply=-1;int error_result=send_client_fd(&p,7,123);assert(error_result==-1 && killed==1 && last_kill==0 && fixture_logged>=2);
+ fixture_logged=0;reply=2;assert(send_client_fd(&p,7,123)==-1 && killed==2 && last_kill==1 && fixture_logged>=2);
  puts("PASS: successful server FD handoffs preserve protocol with zero quiet-mode logs; errors remain logged and full profiling restores diagnostics");
 }
 '''

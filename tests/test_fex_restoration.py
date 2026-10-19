@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess
 
 root = Path(__file__).resolve().parents[1]
-pin = "3bec2ac498bf78156ab47c0c194b0e8cb2849756"
+pin = subprocess.check_output(["git", "ls-tree", "upstream/main", "FEX"], cwd=root, text=True).split()[2]
 assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root / "FEX", text=True).strip() == pin
 subprocess.run(["git", "diff", "--exit-code", pin, "--"], cwd=root / "FEX", check=True)
 for path in ("FEXCore/Source/Interface/Core/Core.cpp", "FEXCore/Source/Utils/ArchHelpers/Arm64.cpp"):

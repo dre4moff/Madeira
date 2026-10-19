@@ -21,6 +21,7 @@ src=r'''
 #include <time.h>
 #include <sys/time.h>
 #include "runtime_profiling.h"
+static int ios_lean_diag_virtual(void){return 0;}
 #define IOS_WAITREG_SLOTS 512
 #define UINT unsigned int
 typedef int64_t timeout_t;
@@ -68,9 +69,9 @@ with tempfile.TemporaryDirectory(prefix='madeira-wait-diag-') as tmp:
  for choice,enabled in [('0',False),('1',True)]:
   env=os.environ.copy();env['MADEIRA_RUNTIME_PROFILING']=choice;env['MADEIRA_QUIET']='1'
   subprocess.run([str(p/'test'),'1' if enabled else '0'],env=env,check=True)
-assert 'madeira_runtime_profiling_enabled() && (cycle == 2 || (cycle % 5) == 0)' in v
+assert 'madeira_runtime_profiling_enabled() && (cycle == 2 || (cycle % ios_warmer_sweep_cycles()) == 0)' in v
 assert 'madeira_runtime_profiling_enabled() && (cycle % 5) == 0 && rx' in v
-assert 'if (madeira_runtime_profiling_enabled()) {\n                        static kern_return_t last[4]' in v
+assert 'if (madeira_runtime_profiling_enabled() && (!ios_lean_diag_virtual() || cycle == 1 || (cycle % 30) == 0))' in v and 'static kern_return_t last[4]' in v
 sig=(root/'build/ntdll-unix/signal_arm64_ios.c').read_text()
 assert sig.index('ios_orphan_check( stamps, ns );') < sig.index('    if (!profiling) return;')
 assert 'sink += rx[o]' in v and 'sink += rw[o]' in v

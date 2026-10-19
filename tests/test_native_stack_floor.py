@@ -109,6 +109,11 @@ static void ios_va_describe(void *p,char *s,size_t n){(void)p;if(n)s[0]=0;}
 static int ios_storm_gate(unsigned long *n){(*n)++;return 0;}
 static const char *ios_scan_stop_name(int s){(void)s;return "synthetic-full-advisory-window";}
 static void ios_af_set(int s,int e,void *p,size_t n){(void)e;(void)p;(void)n;ios_af.stage=s;}
+static int ios_stack_spill_enabled(void){return 0;}
+static SIZE_T ios_thread_stack_floor(void){return 8*1024*1024;}
+static void ios_wow_high_side(void *a,void *b,void **c,void **d){(void)a;(void)b;*c=*d=NULL;}
+static void ios_fex_arena_headroom(void *a,void *b){(void)a;(void)b;}
+static void ios_fex_arena_census(void *a,void *b,size_t n,size_t m){(void)a;(void)b;(void)n;(void)m;}
 static void *anon_mmap_alloc(size_t s,int p){(void)p;anon_calls++;if(anonymous_failure){errno=ENOMEM;return MAP_FAILED;}void *r=(void*)next_base;next_base+=s+0x10000;return r;}
 static void ios_pool_va_warn(const char *s,void *p,size_t n){(void)s;(void)p;(void)n;}
 static size_t unmap_area_above_user_limit(void *p,size_t n){(void)p;return n;}

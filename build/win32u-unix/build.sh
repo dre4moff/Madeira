@@ -11,7 +11,7 @@ set -e
 BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$BUILD_DIR/../.." && pwd)"
 WINE_SRC="$REPO_ROOT/wine"
-WINE_BUILD="$WINE_SRC/build-macos"
+WINE_BUILD="${MADEIRA_WINE_CONFIG_DIR:-$WINE_SRC/build-macos}"
 NTDLL_SHIMS="$REPO_ROOT/build/ntdll-unix/shims"
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 OBJ_DIR="$BUILD_DIR/obj"

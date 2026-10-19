@@ -16,7 +16,8 @@ c = r'''
 #include <assert.h>
 #include <stdio.h>
 #include "runtime_profiling.h"
-static int ios_ts_armed, workers, timers;
+static int ios_ts_armed, workers, timers, ios_lean_diag, ios_power_probe_on;
+static void wine_log_write(const char *f,...){(void)f;}
 static void ios_thread_sampler_main(void) { workers++; }
 static void ios_xprobe_main(void) { workers++; }
 static void ios_wprof_main(void) { workers++; }

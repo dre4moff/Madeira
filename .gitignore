@@ -156,6 +156,7 @@ research/remote-metal/host/rmetald.*
 app/Madeira/licenses/LICENSE-MADEIRA-GPL-3.0.txt
 app/Madeira/licenses/LICENSE-MADEIRA-EXCEPTION.txt
 madeira-d3d12/tests/offline/sm51/
+build/stub-dlls/
 
 # The i386 farm (32-bit Wine + DXMT DLLs) is built from the pinned submodules by
 # build/wine-i386/build.sh (docs/WOW64.md section 9); it is not committed.
@@ -176,3 +177,5 @@ build/dxmt-ios/arm64ec-nvext-generated.ini
 dist/
 app/Madeira/x86_64-vcruntime/MICROSOFT-LICENSE.rtf
 build/wineserver/base-obj/
+# faultrep.dll: build/faultrep/build.sh (its install goes into the tracked farm)
+build/faultrep/out/

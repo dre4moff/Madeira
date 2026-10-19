@@ -46,7 +46,13 @@ print("PASS: per-game DX11 arguments, saved profiles, direct/Steam direct starts
 '''
 
 dock = (root / "madeira-dock/src/launch.c").read_text()
-wide_flag = dock[dock.index("static bool wide_flag("):dock.index("/* Returns 0 once")]
+def dock_function(signature):
+    start=dock.index(signature); end=dock.index('{',start)+1; depth=1
+    while depth:
+        depth += (dock[end]=='{')-(dock[end]=='}'); end+=1
+    return dock[start:end]
+wide_flag=dock_function('static bool wide_flag(')+'\n'+dock_function('static bool read_user_args(')
+
 choice = "    unsigned launch_option=7; char user_args[4096]; assert(read_user_args(user_args, sizeof(user_args)));"
 calls = re.findall(r"^\s*(?:uint64_t )?call = (\(\(launch_fn\).+);", dock, re.M)
 assert len(calls) == 2, "Initial launch and retry must both forward the selected arguments"

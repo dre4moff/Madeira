@@ -63,6 +63,7 @@ final class UIApplication {
 enum MadeiraConfig {
  static var config: [String: String] = [:]
  static func get(_ key: String) -> String? { config[key] }
+ static func gameValue(_ key: String) -> String? { nil }
 }
 final class LogStore { static let shared = LogStore(); func log(_ s: String) { print(s) } }
 final class LibraryController {

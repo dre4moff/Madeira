@@ -4,14 +4,14 @@ set -eu
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DXMT_ROOT="$REPO_ROOT/dxmt"
 DXMT_BUILD="$DXMT_ROOT/build-arm64ec"
-MESON="$REPO_ROOT/toolchains/build-python/bin/meson"
+MESON="${MESON:-$REPO_ROOT/toolchains/build-python/bin/meson}"
 CROSS="$REPO_ROOT/build/dxmt-ios/arm64ec-nvext-generated.ini"
 python3 - "$REPO_ROOT" "$CROSS" <<'PY'
 from pathlib import Path
 import json,sys
 root=Path(sys.argv[1]);prefix=root/'toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin'
 binaries={'c':'clang','cpp':'clang++','ar':'ar','strip':'strip','windres':'windres'}
-out=['[binaries]']+[k+' = '+json.dumps(str(prefix/('arm64ec-w64-mingw32-'+v))) for k,v in binaries.items()]
+out=['[binaries]']+[k+' = '+repr(str(prefix/('arm64ec-w64-mingw32-'+v))) for k,v in binaries.items()]
 out += ['[properties]','needs_exe_wrapper = true','[host_machine]',"system = 'windows'","cpu_family = 'aarch64'","cpu = 'aarch64'","endian = 'little'"]
 Path(sys.argv[2]).write_text('\n'.join(out)+'\n')
 PY

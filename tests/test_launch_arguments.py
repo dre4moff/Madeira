@@ -1,3 +1,4 @@
+from library_host_fixture import texture_memory_profile_fields, madeira_config_parser
 from library_host_fixture import resolution_choices
 """Host-only tests of production profile, argv and Steam/Dock argument paths."""
 from pathlib import Path
@@ -14,6 +15,7 @@ control_action = content_actions[content_actions.index('enum ControlAction:'):co
 library = (root / 'app/Madeira/Library.swift').read_text()
 helper = library[library.index('enum LibraryLaunchArguments {'):library.index('struct LibraryEntry:')]
 fields = library[library.index('struct LibraryEntry: Codable, Identifiable {'):library.index('    var displayMode:')]
+fields += texture_memory_profile_fields()
 computed = library[library.index('    var launchArguments: String {'):library.index('    /// Runs on the launch worker')]
 computed = re.sub(r'    var effectiveFPSMode: Int32 .*\n', '', computed)
 corpus = ['', '-noaudio', '-dx11 -noaudio', '-path "Maps A"', '""', 'a\tb',
@@ -102,7 +104,12 @@ int main(int argc,char **args) {
 }
 '''
 dock = (root/'madeira-dock/src/launch.c').read_text()
-reader = dock[dock.index('static bool wide_flag('):dock.index('/* Returns 0 once')]
+def dock_function(signature):
+    start=dock.index(signature); end=dock.index('{',start)+1; depth=1
+    while depth:
+        depth += (dock[end]=='{')-(dock[end]=='}'); end+=1
+    return dock[start:end]
+reader=dock_function('static bool wide_flag(')+'\n'+dock_function('static bool read_user_args(')
 calls = re.findall(r'^\s*(?:uint64_t )?call = (\(\(launch_fn\).+);',dock,re.M)
 assert len(calls)==2
 dock_test = r'''
@@ -156,6 +163,7 @@ int main(void){
 '''
 swift = resolution_choices() + swift
 
+swift = madeira_config_parser() + swift
 with tempfile.TemporaryDirectory(prefix='madeira-launch-arguments-') as folder:
     p=Path(folder);(p/'main.swift').write_text(swift);(p/'corpus.json').write_text(json.dumps(corpus))
     results=subprocess.check_output(['swift',str(p/'main.swift'),str(p/'corpus.json')],text=True).splitlines()

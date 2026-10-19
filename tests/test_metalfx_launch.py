@@ -1,3 +1,4 @@
+from library_host_fixture import texture_memory_profile_fields, madeira_config_parser
 from library_host_fixture import resolution_choices
 """Actual Steam desktop sizing and output cap; host-only synthetic profiles."""
 from pathlib import Path
@@ -9,6 +10,7 @@ control_action = content_actions[content_actions.index('enum ControlAction:'):co
 l=(root/'app/Madeira/Library.swift').read_text()
 helper=l[l.index('enum LibraryMetalFX {'):l.index('\nstruct LibraryEntry:')]
 fields=l[l.index('struct LibraryEntry:'):l.index('    var displayMode: DisplayMode')]
+fields += texture_memory_profile_fields()
 prop=l[l.index('    var sessionRenderResolution: String {'):l.index('\n    func configureLaunch()',l.index('    var sessionRenderResolution: String {'))]
 view=(root/'app/Madeira/ContentView.swift').read_text()
 start=view.index('            // Explorer must use the same render mode')
@@ -71,6 +73,7 @@ int main() {
 '''
 swift = resolution_choices() + swift
 
+swift = madeira_config_parser() + swift
 with tempfile.TemporaryDirectory(prefix='madeira-metalfx-launch-') as tmp:
  p=Path(tmp);(p/'main.swift').write_text(swift);(p/'test.cpp').write_text(c);(p/'profile.c').write_text(profile)
  subprocess.run(['swift',str(p/'main.swift')],check=True)

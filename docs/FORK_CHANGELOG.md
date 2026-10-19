@@ -23,7 +23,7 @@ are retained safely; a later supplied dependency can complete the load. Wine QoS
 modules are included for ARM64EC and ARM64. See [scope and checks](R36_FAILED_IMPORT_MEMORY.md).
 The user reports stable menu memory on r36; online operation remains unverified.
 
-# Complete fork changes — Madeira 0.1.3 / r34
+# Complete fork changes — Madeira 0.1.3 / r39
 
 This unofficial fork is based on Will Faust's official `v0.1.3`
 (`4e9d45a74294cd820120791c4b3f2b79adf4fc70`). Original copyright and licenses
@@ -31,6 +31,25 @@ are retained. Fork changes were prepared with AI assistance and are offered
 for inspection, not as an upstream endorsement or a guaranteed FPS increase.
 The final FEX gitlink and source tree remain original; the earlier custom
 FEX performance/diagnostic gate was removed before this release.
+
+## r39 — Complete current upstream synchronization
+
+- Merge all 212 missing upstream history commits through `279fd0f` and the
+  original FEX, Wine and DXMT pins, preserving every fork feature and fix.
+- Include per-game recommendations/configuration, launcher and JIT-pool work,
+  D3D12 caching/rendering, wineserver request paths and the new installer flow.
+- Keep local Dock separate from Steam install sessions and make Wine/Microsoft
+  runtime choices mutually exclusive, preserving saved explicit preferences.
+- Rebuild affected native, ARM64EC, ARM64 and i386 components. Optimized unsigned
+  Release build 24; 198 host suites passed, eight explicit platform/historical
+  exclusions. Phone acceptance remains open. See [r39 details](R39_UPSTREAM_SYNC.md).
+
+## r38 / r37 / r36 / r35 — Prior fork patches retained
+
+Shared trusted CA roots, Darwin UDP TOS control and bounded Steam connection
+reports, failed-import reclamation with Wine QoS modules, and the separate
+local-executable Dock launch path all remain included. See the corresponding
+R38, R37, R36 and R35 reports in this directory.
 
 ## r34 — Per-game texture memory saving
 
